@@ -78,12 +78,27 @@ microsoft/Phi-3-mini-4k-instruct:
   attn_implementation: null
   compile: False
   dtype: int8
-
 cais/zephyr_7b_r2d2:
   id: cais/zephyr_7b_r2d2
   tokenizer_id: cais/zephyr_7b_r2d2
   short_name: R2D2
   developer_name: ContinuousAT
+  attn_implementation: null
+  compile: False
+  dtype: int8
+GraySwanAI/Llama-3-8B-Instruct-RR:
+  id: GraySwanAI/Llama-3-8B-Instruct-RR
+  tokenizer_id: meta-llama/Meta-Llama-3-8B-Instruct
+  short_name: Llama
+  developer_name: GraySwanAI
+  attn_implementation: null
+  compile: False
+  dtype: int8
+GraySwanAI/Mistral-7B-Instruct-RR:
+  id: GraySwanAI/Mistral-7B-Instruct-RR
+  tokenizer_id: mistralai/Mistral-7B-Instruct-v0.3
+  short_name: Mistral
+  developer_name: GraySwanAI
   attn_implementation: null
   compile: False
   dtype: int8

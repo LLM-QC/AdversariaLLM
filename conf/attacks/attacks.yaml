@@ -42,9 +42,8 @@ ample_gcg:
       min_new_tokens: 20
       diversity_penalty: 1.0
   target_lm:
-    batch_size: 64
-    generation_config:
-      max_new_tokens: 100
+    batch_size: 24
+    generation_steps: 256
 gcg:
   name: gcg
   type: discrete
@@ -67,6 +66,7 @@ gcg:
   filter_ids: True
   add_space_before_target: False
   verbosity: WARNING
+  generation_steps: 256
 autodan:
   name: autodan
   type: discrete
@@ -82,3 +82,4 @@ autodan:
   num_points: 5
   mutation: 0.01
   mutate_model_id: null
+  generation_steps: 256 # have to implement this

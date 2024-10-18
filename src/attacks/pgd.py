@@ -106,7 +106,6 @@ class PGDAttack(Attack):
                         perturbed_embeddings = (original_embeddings + delta).detach()
 
                     if self.config.generate_completions == "all":
-                        # Get completions right away
                         completion = self.get_completions(
                             model,
                             tokenizer,

@@ -1,4 +1,4 @@
-"""Implementation of a embedding-space continuous attack."""
+"""Single-file implementation of the AmpleGCG attack."""
 
 from dataclasses import dataclass
 from typing import Literal
@@ -17,7 +17,7 @@ from transformers import (
     BitsAndBytesConfig,
     GenerationConfig,
 )
-
+from src.lm_utils import get_batched_completions
 from .attack import Attack, AttackResult
 
 
@@ -43,39 +43,21 @@ class AmpleGCGAttack(Attack):
         super().__init__(config)
 
     def run(self, model: torch.nn.Module, tokenizer, dataset) -> AttackResult:
-        generation_config = GenerationConfig(
-            **self.config.target_lm.generation_config,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-            bos_token_id=tokenizer.bos_token_id,
-        )
 
-        results = []
+        results = AttackResult([], [], [], [])
         for msg, target in dataset:
-            attacks = self.get_attack_prompts(f"### Query:{msg} ### Prompt:")
+            attacks = self.get_attack_prompts(f"### Query:{msg['content']} ### Prompt:")
             losses = find_executable_batch_size(
                 self.get_losses, self.config.target_lm.batch_size
             )(msg, attacks, target, model, tokenizer)
             completions = find_executable_batch_size(
                 self.get_completions, self.config.target_lm.batch_size
-            )(msg, attacks, model, tokenizer, generation_config)
-            results.append(
-                AmpleGCGAttackResult(
-                    attacks=attacks, losses=losses, prompt=msg, completions=completions
-                )
-            )
-        losses = [r.losses for r in results]
-        attacks = [r.attacks for r in results]
-        prompts = [r.prompt for r in results]
-        completions = [r.completions for r in results]
-        # Create and return the AttackResult object
-        return AttackResult(
-            attacks=attacks,
-            completions=completions,
-            losses=losses,
-            prompts=prompts,
-        )
-
+            )(msg, attacks, model, tokenizer)
+            results.attacks.append(attacks)
+            results.losses.append(losses)
+            results.prompts.append(msg)
+            results.completions.append(completions)
+        return results
 
     def get_attack_prompts(self, msg):
         prompter_model = PrompterModel(self.config.prompter_lm).to("cuda")
@@ -92,7 +74,7 @@ class AmpleGCGAttack(Attack):
 
     # q_s questions, p_s prompts
     def get_completions(
-        self, batch_size, prompt, attacks, model, tokenizer, generation_config
+        self, batch_size, prompt, attacks, model, tokenizer
     ):
         outputs = []
         for i in trange(0, len(attacks), batch_size, desc="Target Model"):
@@ -100,17 +82,23 @@ class AmpleGCGAttack(Attack):
                 self._format_prompt(prompt["content"], attack, tokenizer)
                 for attack in attacks[i : i + batch_size]
             ]
-            for b in batch:
-                print(tokenizer([b], return_tensors="pt").input_ids.size())
+            # token_list = [tokenizer.encode(b, return_tensors="pt")[0] for b in batch]
+            # output = get_batched_completions(
+            #     model,
+            #     tokenizer,
+            #     token_list=token_list,
+            #     max_new_tokens=self.config.target_lm.generation_steps,
+            # )
             input_ids = tokenizer(batch, return_tensors="pt", padding=True).to(
                 model.device
             )
             with torch.no_grad():
                 output = model.generate(
-                    **input_ids, generation_config=generation_config
+                    **input_ids,
+                    max_new_tokens=self.config.target_lm.generation_steps,
                 )
-            output = output[:, input_ids.input_ids.shape[1] :]
-            outputs.extend(tokenizer.batch_decode(output, skip_special_tokens=True))
+            output = tokenizer.batch_decode(output[:, input_ids.input_ids.shape[1] :], skip_special_tokens=True)
+            outputs.extend(output)
         return outputs
 
     def get_losses(self, batch_size, prompt, attacks, target, model, tokenizer):
@@ -127,10 +115,10 @@ class AmpleGCGAttack(Attack):
                 [target] * len(batch), return_tensors="pt"
             ).input_ids.to(model.device)
             logits = model(input_ids=torch.cat([input_ids, target_ids], dim=1)).logits
-            logits = logits[:, input_ids.shape[-1]:]
+            logits = logits[:, input_ids.shape[-1] :]
             loss = F.cross_entropy(
                 logits.reshape(-1, logits.size(-1)),
-                target_ids[:, -logits.size(1):].view(-1),
+                target_ids[:, -logits.size(1) :].view(-1),
                 reduction="none",
             )
             loss = loss.view(len(batch), -1).mean(dim=1)
@@ -186,6 +174,7 @@ class PrompterModel(nn.Module):
         input_ids = self.tokenizer(batch, return_tensors="pt", padding=True).to(
             self.model.device
         )
+        # Does a beam search to generate multiple completions per prompt
         output = self.model.generate(**input_ids, generation_config=self.gen_config)
         output = output[:, input_ids["input_ids"].shape[-1] :]
         output_text = self.tokenizer.batch_decode(output, skip_special_tokens=True)

@@ -21,9 +21,7 @@ class AttackResult:
 
     attacks: list[list[str]]
     losses: list[list[float]]
-    # successes: list[list[int | None]]
     prompts: list[str]
-    # refusals: list[list[int | None]]
     completions: list[list[int | None]] = None
 
 

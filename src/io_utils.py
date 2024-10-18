@@ -60,9 +60,7 @@ def load_model_and_tokenizer(model_path, config, model_params):
         tokenizer.unk_token_id = 0
     if "llama-2" in model_path:
         tokenizer.pad_token = tokenizer.unk_token
-        tokenizer.padding_side = "left"
-    if "falcon" in model_path:
-        tokenizer.padding_side = "left"
+    tokenizer.padding_side = "left"
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token
 
