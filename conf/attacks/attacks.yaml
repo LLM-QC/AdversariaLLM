@@ -29,6 +29,7 @@ ample_gcg:
   placement: suffix
   generate_completions: all
   seed: 0
+  skip_longer_than: 500
   prompter_lm:
     id: osunlp/AmpleGCG-llama2-sourced-llama2-7b-chat
     batch_size: 2

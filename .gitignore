@@ -3,3 +3,4 @@ outputs/
 __pycache__
 multirun/
 *.egg-info/
+.vscode/

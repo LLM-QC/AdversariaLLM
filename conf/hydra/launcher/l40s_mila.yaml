@@ -16,3 +16,4 @@ gres: gpu:l40s:1
 mem_gb: 32
 cpus_per_task: 4
 partition: long
+array_parallelism: 24

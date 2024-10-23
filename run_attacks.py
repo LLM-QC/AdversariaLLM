@@ -14,6 +14,7 @@ from src.datasets import Dataset
 from src.errors import print_exceptions
 from src.io_utils import load_model_and_tokenizer, log_attack
 
+logger = logging.getLogger(__name__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.use_deterministic_algorithms(True, warn_only=True)  # determinism
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -34,26 +35,26 @@ class RunConfig:
 @print_exceptions
 def main(cfg: DictConfig) -> None:
     date_time_string = datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
-    logging.info("-------------------")
-    logging.info(f"Commencing run `{date_time_string}`")
-    logging.info("-------------------")
+    logger.info("-------------------")
+    logger.info(f"Commencing run `{date_time_string}`")
+    logger.info("-------------------")
 
     for model_name, model_params in cfg.models.items():
         if cfg.model_name is not None and model_name != cfg.model_name:
             continue
-        logging.info(f"Target: {model_name}\n{OmegaConf.to_yaml(model_params)}")
+        logger.info(f"Target: {model_name}\n{OmegaConf.to_yaml(model_params)}")
         model, tokenizer = load_model_and_tokenizer(model_name, cfg, model_params)
         for dataset_name, dataset_params in cfg.datasets.items():
             if cfg.dataset_name is not None and dataset_name != cfg.dataset_name:
                 continue
-            logging.info(
+            logger.info(
                 f"Dataset: {dataset_name}\n{OmegaConf.to_yaml(dataset_params)}"
             )
             dataset = Dataset.from_name(dataset_name)(dataset_params)
             for attack_name, attack_params in cfg.attacks.items():
                 if cfg.attack_name is not None and attack_name != cfg.attack_name:
                     continue
-                logging.info(
+                logger.info(
                     f"Attack: {attack_name}\n{OmegaConf.to_yaml(attack_params)}"
                 )
                 attack = Attack.from_name(attack_name)(attack_params)

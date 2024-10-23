@@ -2,7 +2,7 @@ defaults:
   - attacks: attacks
   - datasets: datasets_dd
   - models: models
-  # - override hydra/launcher: l40s_mila.yaml
+  - override hydra/launcher: l40s_mila.yaml
   - _self_
 
 hydra:

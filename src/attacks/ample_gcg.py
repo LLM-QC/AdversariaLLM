@@ -2,10 +2,12 @@
 
 from dataclasses import dataclass
 from typing import Literal
+import gc
 
 import torch
 from accelerate.utils import find_executable_batch_size
 from tqdm import trange
+import logging
 
 import torch
 import torch.nn as nn
@@ -20,11 +22,12 @@ from transformers import (
 from src.lm_utils import get_batched_completions
 from .attack import Attack, AttackResult
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class AmpleGCGAttackResult:
     """A class to store the attack result for a single instance in a dataset."""
-
     attacks: list[str]
     losses: list[float]
     prompt: list
@@ -36,16 +39,29 @@ class AmpleGCGConfig:
     name: str = "AmpleGCG"
     type: str = "discrete"
     generate_completions: Literal["all", "best", "last"] = "last"
+    skip_longer_than: int|None = None
 
 
 class AmpleGCGAttack(Attack):
     def __init__(self, config: AmpleGCGConfig):
         super().__init__(config)
+        self.prompter_model = PrompterModel(self.config.prompter_lm).to("cuda")
 
     def run(self, model: torch.nn.Module, tokenizer, dataset) -> AttackResult:
 
         results = AttackResult([], [], [], [])
         for msg, target in dataset:
+
+            # some messages are too long to handle with a large beam search, skip for now
+            #  -> currently doing this on num chars not actual number of tokens
+            if self.config.skip_longer_than and len(msg["content"]) > self.config.skip_longer_than:
+                attacks, losses, completions = [], [], []
+                results.attacks.append(attacks)
+                results.losses.append(losses)
+                results.prompts.append(msg)
+                results.completions.append(completions)
+                continue
+
             attacks = self.get_attack_prompts(f"### Query:{msg['content']} ### Prompt:")
             losses = find_executable_batch_size(
                 self.get_losses, self.config.target_lm.batch_size
@@ -57,12 +73,15 @@ class AmpleGCGAttack(Attack):
             results.losses.append(losses)
             results.prompts.append(msg)
             results.completions.append(completions)
+
+            del attacks, losses, completions
+            gc.collect(); torch.cuda.empty_cache()
+
         return results
 
     def get_attack_prompts(self, msg):
-        prompter_model = PrompterModel(self.config.prompter_lm).to("cuda")
-        prompter_model.eval()
-        return prompter_model.run([msg])
+        self.prompter_model.eval()
+        return self.prompter_model.run([msg])
 
     @staticmethod
     def _format_prompt(prompt, attack, tokenizer):
@@ -82,13 +101,6 @@ class AmpleGCGAttack(Attack):
                 self._format_prompt(prompt["content"], attack, tokenizer)
                 for attack in attacks[i : i + batch_size]
             ]
-            # token_list = [tokenizer.encode(b, return_tensors="pt")[0] for b in batch]
-            # output = get_batched_completions(
-            #     model,
-            #     tokenizer,
-            #     token_list=token_list,
-            #     max_new_tokens=self.config.target_lm.generation_steps,
-            # )
             input_ids = tokenizer(batch, return_tensors="pt", padding=True).to(
                 model.device
             )
