@@ -13,10 +13,10 @@ from src.attacks import AttackResult
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def load_model_and_tokenizer(model_path, config, model_params):
+def load_model_and_tokenizer(model_path, model_params):
     gc.collect()
     torch.cuda.empty_cache()
-    if model_params.dtype != "float16":
+    if "float16" not in model_params.dtype:
         if model_params.dtype == "int4":
             quantization_config = BitsAndBytesConfig(
                 load_in_4bit=True,
@@ -33,20 +33,20 @@ def load_model_and_tokenizer(model_path, config, model_params):
 
         model = AutoModelForCausalLM.from_pretrained(model_path,
                                                      trust_remote_code=True,
-                                                     quantization_config=quantization_config,)
+                                                     quantization_config=quantization_config,).eval()
     else:
         model = (
             AutoModelForCausalLM.from_pretrained(
                 model_path,
                 torch_dtype=getattr(torch, model_params.dtype),
                 trust_remote_code=True,
-                attn_implementation=model_params.attn_implementation,
             )
             .to(device)
             .eval()
         )
     if model_params.compile:
-        model.forward = torch.compile(model.forward, mode="reduce-overhead", fullgraph=True)
+        model = torch.compile(model)
+
 
     model.config.short_name = model_params.short_name
     model.config.developer_name = model_params.developer_name

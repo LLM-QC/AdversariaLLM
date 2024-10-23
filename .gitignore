@@ -2,3 +2,4 @@ outputs/
 *.pyc
 __pycache__
 multirun/
+old_outputs/

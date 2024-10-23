@@ -218,7 +218,7 @@ class AutoDANAttack(Attack):
             embed_layer = model.get_input_embeddings()
             target_ids = tokenizer(
                 [target], add_special_tokens=False, return_tensors="pt"
-            )["input_ids"].to(model.device)
+            ).input_ids.to(model.device)
             target_embeds = embed_layer(target_ids)
 
             attacks = []
@@ -229,15 +229,14 @@ class AutoDANAttack(Attack):
             def chat_template_to_tokens(
                 templates: list[dict[str, str]] | list[list[dict[str, str]]]
             ) -> torch.Tensor:
-                # Apply chat templates in batch
                 templates = tokenizer.apply_chat_template(
                     templates, tokenize=False, add_generation_prompt=True
                 )
 
                 # Remove BOS token in batch
                 for j in range(len(templates)):
-                    if tokenizer.bos_token and templates[j][0] == tokenizer.bos_token:
-                        templates[j] = templates[j][1:]
+                    if tokenizer.bos_token and templates[j].startswith(tokenizer.bos_token):
+                        templates[j] = templates[j].replace(tokenizer.bos_token, "", 1)
 
                 inputs = (
                     tokenizer(
@@ -290,6 +289,7 @@ class AutoDANAttack(Attack):
                     control_prefixes=optim_strings[: self.config.batch_size],
                     loss_list=loss.float().cpu().numpy().tolist(),
                     num_elites=int(self.config.batch_size * self.config.num_elites),
+                    tokenizer=tokenizer,
                     batch_size=self.config.batch_size,
                     crossover=self.config.crossover,
                     num_points=self.config.num_points,
@@ -371,6 +371,7 @@ class AutoDANAttack(Attack):
         loss_list,
         num_elites,
         batch_size,
+        tokenizer,
         crossover=0.5,
         num_points=5,
         mutation=0.01,
@@ -395,6 +396,7 @@ class AutoDANAttack(Attack):
         # Step 4: Apply crossover and mutation to the selected parents
         mutated_offspring = self.apply_crossover_and_mutation(
             parents_list,
+            tokenizer,
             crossover_probability=crossover,
             num_points=num_points,
             mutation_rate=mutation,
@@ -422,6 +424,7 @@ class AutoDANAttack(Attack):
     def apply_crossover_and_mutation(
         self,
         selected_data,
+        tokenizer,
         crossover_probability=0.5,
         num_points=3,
         mutation_rate=0.01,
@@ -456,6 +459,7 @@ class AutoDANAttack(Attack):
         # ====== Mutate =====
         mutated_offspring = mutate_model.batched_generate(
             offspring_to_mutate,
+            tokenizer,
             max_n_tokens=1400,
             temperature=1.0,
         )
@@ -534,6 +538,7 @@ class HuggingFace:
     def batched_generate(
         self,
         sentences,
+        tokenizer,
         max_n_tokens: int = 1024,
         temperature: float = 1.0,
     ):
@@ -551,6 +556,10 @@ class HuggingFace:
         inputs = self.tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
+        # Remove BOS token in batch
+        for j in range(len(inputs)):
+            if tokenizer.bos_token and inputs[j].startswith(tokenizer.bos_token):
+                inputs[j] = inputs[j].replace(tokenizer.bos_token, "", 1)
 
         generation_function = find_executable_batch_size(
             self.batch_generate_bs, self.generation_batch_size

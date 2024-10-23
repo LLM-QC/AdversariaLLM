@@ -4,20 +4,15 @@ from dataclasses import dataclass
 from typing import Literal
 
 import torch
+import torch.nn as nn
 from accelerate.utils import find_executable_batch_size
 from tqdm import trange
+from transformers import BitsAndBytesConfig, GenerationConfig
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from tqdm import trange
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-    GenerationConfig,
-)
-from src.lm_utils import get_batched_completions
+from src.io_utils import load_model_and_tokenizer
+from src.lm_utils import (get_batched_completions, get_batched_losses,
+                          prepare_tokens)
+
 from .attack import Attack, AttackResult
 
 
@@ -78,51 +73,47 @@ class AmpleGCGAttack(Attack):
     ):
         outputs = []
         for i in trange(0, len(attacks), batch_size, desc="Target Model"):
-            batch = [
-                self._format_prompt(prompt["content"], attack, tokenizer)
-                for attack in attacks[i : i + batch_size]
+            token_list = [prepare_tokens(
+                tokenizer,
+                prompt["content"],
+                "ZZZZZ",  #  need dummy target (probably)
+                attack=attack,
+                placement="suffix",
+            ) for attack in attacks[i : i + batch_size]]
+            token_list = [
+                torch.cat([a, b, c, d], dim=0) for a, b, c, d, _ in token_list
             ]
-            # token_list = [tokenizer.encode(b, return_tensors="pt")[0] for b in batch]
-            # output = get_batched_completions(
-            #     model,
-            #     tokenizer,
-            #     token_list=token_list,
-            #     max_new_tokens=self.config.target_lm.generation_steps,
-            # )
-            input_ids = tokenizer(batch, return_tensors="pt", padding=True).to(
-                model.device
+            output = get_batched_completions(
+                model,
+                tokenizer,
+                token_list=token_list,
+                max_new_tokens=self.config.target_lm.generation_steps,
+                return_tokens=False,
             )
-            with torch.no_grad():
-                output = model.generate(
-                    **input_ids,
-                    max_new_tokens=self.config.target_lm.generation_steps,
-                )
-            output = tokenizer.batch_decode(output[:, input_ids.input_ids.shape[1] :], skip_special_tokens=True)
             outputs.extend(output)
         return outputs
 
     def get_losses(self, batch_size, prompt, attacks, target, model, tokenizer):
         outputs = []
         for i in trange(0, len(attacks), batch_size, desc="Target Model"):
-            batch = [
-                self._format_prompt(prompt["content"], attack, tokenizer)
-                for attack in attacks[i : i + batch_size]
-            ]
-            input_ids = tokenizer(
-                batch, return_tensors="pt", padding=True
-            ).input_ids.to(model.device)
-            target_ids = tokenizer(
-                [target] * len(batch), return_tensors="pt"
-            ).input_ids.to(model.device)
-            logits = model(input_ids=torch.cat([input_ids, target_ids], dim=1)).logits
-            logits = logits[:, input_ids.shape[-1] :]
-            loss = F.cross_entropy(
-                logits.reshape(-1, logits.size(-1)),
-                target_ids[:, -logits.size(1) :].view(-1),
-                reduction="none",
+            token_list = [prepare_tokens(
+                tokenizer,
+                prompt["content"],
+                "ZZZZZ",  # need dummy target (probably)
+                attack=attack,
+                placement="suffix",
+            ) for attack in attacks[i : i + batch_size]]
+            target_lengths = [e.size(0) for a, b, c, d, e in token_list]
+            token_list = [torch.cat(t, dim=0) for t in token_list]
+            targets = [t.roll(-1, 0) for t in token_list]
+
+            losses = get_batched_losses(
+                model,
+                targets=targets,
+                token_list=token_list,
             )
-            loss = loss.view(len(batch), -1).mean(dim=1)
-            outputs.extend(loss.cpu().tolist())
+            losses = [l[-tl:].mean().item() for l, tl in zip(losses, target_lengths)]
+            outputs.extend(losses)
         return outputs
 
 
@@ -155,10 +146,7 @@ class PrompterModel(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.batch_size = config.batch_size
-
-        kwargs = check_torch_dtype(config)
-        self.model = AutoModelForCausalLM.from_pretrained(config.id, **kwargs)
-        self.tokenizer = AutoTokenizer.from_pretrained(config.id)
+        self.model, self.tokenizer = load_model_and_tokenizer(config.id, config)
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.gen_kwargs = {
@@ -171,9 +159,8 @@ class PrompterModel(nn.Module):
         )
 
     def _prompterlm_run_batch(self, batch):
-        input_ids = self.tokenizer(batch, return_tensors="pt", padding=True).to(
-            self.model.device
-        )
+        input_ids = self.tokenizer(batch, return_tensors="pt", padding=True)
+        input_ids = input_ids.to(self.model.device)
         # Does a beam search to generate multiple completions per prompt
         output = self.model.generate(**input_ids, generation_config=self.gen_config)
         output = output[:, input_ids["input_ids"].shape[-1] :]

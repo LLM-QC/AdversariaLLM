@@ -1,3 +1,22 @@
+"""Single-file implementation of the GCG attack.
+Extensively tested against a variety of models, including:
+    cais/zephyr_7b_r2d2
+    ContinuousAT/Llama-2-7B-CAT
+    ContinuousAT/Phi-CAT
+    ContinuousAT/Zephyr-CAT
+    google/gemma-2-2b-it
+    GraySwanAI/Llama-3-8B-Instruct-RR
+    GraySwanAI/Mistral-7B-Instruct-RR
+    HuggingFaceH4/zephyr-7b-beta
+    meta-llama/Llama-2-7b-chat-hf
+    meta-llama/Meta-Llama-3.1-8B-Instruct
+    microsoft/Phi-3-mini-4k-instruct
+    mistralai/Mistral-7B-Instruct-v0.3
+    qwen/Qwen2-7B-Instruct
+
+Fixes several issues with nanoGCG, mostly re. Llama-2.
+"""
+
 import gc
 import logging
 from dataclasses import dataclass
@@ -7,9 +26,9 @@ import torch
 import transformers
 from accelerate.utils import find_executable_batch_size
 from torch import Tensor
-from tqdm import tqdm
+from tqdm import trange
 
-from src.lm_utils import get_batched_completions
+from src.lm_utils import get_batched_completions, prepare_tokens
 
 from .attack import Attack, AttackResult
 
@@ -37,7 +56,6 @@ class GCGConfig:
     filter_ids: bool = True
     add_space_before_target: bool = False
     verbosity: str = "WARNING"
-
 
 
 def get_nonascii_toks(tokenizer, device="cpu"):
@@ -72,8 +90,8 @@ def mellowmax(t: Tensor, alpha=1.0, dim=-1):
     )
 
 
-def filter_ids(ids: Tensor, pos: Tensor, tokenizer: transformers.PreTrainedTokenizer):
-    """Filters out sequeneces of token ids that change after retokenization.
+def filter_ids(ids: Tensor, tokenizer: transformers.PreTrainedTokenizer):
+    """Filters out sequences of token ids that change after retokenization.
 
     Args:
         ids : Tensor, shape = (search_width, n_optim_ids)
@@ -84,26 +102,29 @@ def filter_ids(ids: Tensor, pos: Tensor, tokenizer: transformers.PreTrainedToken
             all token ids that are the same after retokenization
     """
     ids_decoded = tokenizer.batch_decode(ids)
-    filtered_ids = []
-    filtered_pos = []
+    filtered_idx = []
 
     for i in range(len(ids_decoded)):
         # Retokenize the decoded token ids
-        ids_encoded = tokenizer(
-            ids_decoded[i], return_tensors="pt", add_special_tokens=False
-        ).to(ids.device)["input_ids"][0]
-        if torch.equal(ids[i], ids_encoded):
-            filtered_ids.append(ids[i])
-            filtered_pos.append(pos[i])
+        ids_encoded = (
+            tokenizer(ids_decoded[i], return_tensors="pt", add_special_tokens=False)
+            .to(ids.device)
+            .input_ids[0]
+        )
+        # Changed vs the original GCG implementation, we cut off the first few tokens.
+        # This is because we feed the entire text (prompt + attack + post),
+        # which is more accurate in general, but can lead to weird stuff at the
+        # beginning of the sequence.
+        if torch.equal(ids[i, 1:], ids_encoded[-ids.size(1) + 1 :]):
+            filtered_idx.append(i)
 
-    if not filtered_ids:
+    if not filtered_idx:
         # This occurs in some cases, e.g. using the Llama-3 tokenizer with a bad initialization
         raise RuntimeError(
             "No token sequences are the same after decoding and re-encoding. "
             "Consider setting `filter_ids=False` or trying a different `optim_str_init`"
         )
-
-    return torch.stack(filtered_ids), torch.stack(filtered_pos)
+    return filtered_idx
 
 
 class GCGAttack(Attack):
@@ -128,60 +149,43 @@ class GCGAttack(Attack):
         )
 
         results = AttackResult([], [], [], [])
-        for message, target in dataset:
-            message: dict[str, str]
+        for msg, target in dataset:
+            msg: dict[str, str]
             target: str
-            prompt = message["content"]
-            message["content"] = message["content"] + self.config.optim_str_init
 
-            template = tokenizer.apply_chat_template(
-                [message], tokenize=False, add_generation_prompt=True
+            pre_ids, prompt_ids, attack_ids, post_ids, target_ids = prepare_tokens(
+                tokenizer,
+                msg["content"],
+                target,
+                attack=self.config.optim_str_init,
+                placement="suffix",
             )
-            # Remove the BOS token -- this will get added when tokenizing, if necessary
-            if tokenizer.bos_token and template.startswith(tokenizer.bos_token):
-                template = template.replace(tokenizer.bos_token, "")
-            before_str, after_str = template.split(self.config.optim_str_init)
-
-            # Tokenize everything that doesn't get optimized
-            before_ids = (
-                tokenizer([before_str], padding=False, return_tensors="pt")["input_ids"]
-                .to(model.device)
-                .to(torch.int64)
-            )
-            after_ids = (
-                tokenizer([after_str], add_special_tokens=False, return_tensors="pt")[
-                    "input_ids"
-                ]
-                .to(model.device)
-                .to(torch.int64)
-            )
-            target_ids = (
-                tokenizer([target], add_special_tokens=False, return_tensors="pt")[
-                    "input_ids"
-                ]
-                .to(model.device)
-                .to(torch.int64)
-            )
+            pre_ids = pre_ids.unsqueeze(0).to(model.device)
+            prompt_ids = prompt_ids.unsqueeze(0).to(model.device)
+            pre_prompt_ids = torch.cat([pre_ids, prompt_ids], dim=1)
+            attack_ids = attack_ids.unsqueeze(0).to(model.device)
+            post_ids = post_ids.unsqueeze(0).to(model.device)
+            target_ids = target_ids.unsqueeze(0).to(model.device)
 
             # Embed everything that doesn't get optimized
             embedding_layer = model.get_input_embeddings()
-            before_embeds, after_embeds, target_embeds = [
-                embedding_layer(ids) for ids in (before_ids, after_ids, target_ids)
+            pre_prompt_embeds, post_embeds, target_embeds = [
+                embedding_layer(ids) for ids in (pre_prompt_ids, post_ids, target_ids)
             ]
 
             # Compute the KV Cache for tokens that appear before the optimized tokens
             if self.config.use_prefix_cache:
                 with torch.no_grad():
-                    output = model(inputs_embeds=before_embeds, use_cache=True)
+                    output = model(inputs_embeds=pre_prompt_embeds, use_cache=True)
                     self.prefix_cache = output.past_key_values
 
             self.target_ids = target_ids
-            self.before_embeds = before_embeds
-            self.after_embeds = after_embeds
+            self.pre_prompt_embeds = pre_prompt_embeds
+            self.post_embeds = post_embeds
             self.target_embeds = target_embeds
 
             # Initialize the attack buffer
-            buffer = self.init_buffer(model, tokenizer)
+            buffer = self.init_buffer(model, attack_ids)
             optim_ids = buffer.get_best_ids()
             token_selection = SubstitutionSelectionStrategy("gcg")
 
@@ -189,7 +193,7 @@ class GCGAttack(Attack):
             optim_strings = []
             self.stop_flag = False
 
-            for _ in tqdm(range(self.config.num_steps)):
+            for _ in trange(self.config.num_steps):
                 # Compute the token gradient
                 optim_ids_onehot_grad = self.compute_token_gradient(optim_ids, model)
 
@@ -204,9 +208,34 @@ class GCGAttack(Attack):
                         not_allowed_ids=not_allowed_ids,
                     )
                     if self.config.filter_ids:
-                        sampled_ids, sampled_ids_pos = filter_ids(
-                            sampled_ids, sampled_ids_pos, tokenizer
+                        # We're trying to be as strict as possible here, so we filter
+                        # the entire prompt, not just the attack sequence in an isolated
+                        # way. This is because the prompt and attack can affect each
+                        # other's tokenization in some cases.
+                        idx = filter_ids(
+                            torch.cat(
+                                [
+                                    (
+                                        pre_prompt_ids.repeat(sampled_ids.shape[0], 1)
+                                        if tokenizer.name_or_path != "meta-llama/Meta-Llama-3-8B-Instruct"
+                                        else torch.tensor([]).to(sampled_ids)
+                                    ),
+                                    sampled_ids,
+                                    # Zephyr tokenizer re-tokenizes post_ids differently
+                                    # every time
+                                    (
+                                        post_ids.repeat(sampled_ids.shape[0], 1)
+                                        if "zephyr" not in tokenizer.name_or_path
+                                        else torch.tensor([]).to(sampled_ids)
+                                    ),
+                                ],
+                                dim=1,
+                            ),
+                            tokenizer,
                         )
+
+                        sampled_ids = sampled_ids[idx]
+                        sampled_ids_pos = sampled_ids_pos[idx]
 
                     new_search_width = sampled_ids.shape[0]
 
@@ -220,7 +249,7 @@ class GCGAttack(Attack):
                         input_embeds = torch.cat(
                             [
                                 embedding_layer(sampled_ids),
-                                after_embeds.repeat(new_search_width, 1, 1),
+                                post_embeds.repeat(new_search_width, 1, 1),
                                 target_embeds.repeat(new_search_width, 1, 1),
                             ],
                             dim=1,
@@ -228,9 +257,9 @@ class GCGAttack(Attack):
                     else:
                         input_embeds = torch.cat(
                             [
-                                before_embeds.repeat(new_search_width, 1, 1),
+                                pre_prompt_embeds.repeat(new_search_width, 1, 1),
                                 embedding_layer(sampled_ids),
-                                after_embeds.repeat(new_search_width, 1, 1),
+                                post_embeds.repeat(new_search_width, 1, 1),
                                 target_embeds.repeat(new_search_width, 1, 1),
                             ],
                             dim=1,
@@ -267,28 +296,20 @@ class GCGAttack(Attack):
                     raise ValueError(
                         f"Unknown value for generate_completions: {self.config.generate_completions}"
                     )
-            all_modified_message = []
-
-            for string in attacks:
-                msg = {k: v for k, v in message.items()}
-                msg["content"] = msg["content"] + " " + string
-                all_modified_message.append([msg])
-
-            # Apply chat templates in batch
-            templates = tokenizer.apply_chat_template(
-                all_modified_message, tokenize=False, add_generation_prompt=True
-            )
-
-            # Remove BOS token in batch
-            for j in range(len(templates)):
-                if tokenizer.bos_token and templates[j][0] == tokenizer.bos_token:
-                    templates[j] = templates[j][1:]
 
             token_list = [
-                tokenizer(t, return_tensors="pt", add_special_tokens=True)
-                .input_ids[0]
-                .to(model.device)
-                for t in templates
+                prepare_tokens(
+                    tokenizer,
+                    msg["content"],
+                    "ZZZZZ",
+                    attack=attack,
+                    placement="suffix",
+                )
+                for attack in attacks
+            ]
+            token_list = [
+                torch.cat([a, b, c, d], dim=0).to(model.device)
+                for a, b, c, d, e in token_list
             ]
             completions = get_batched_completions(
                 model,
@@ -299,7 +320,7 @@ class GCGAttack(Attack):
             )
             results.losses.append(losses)
             results.attacks.append(optim_strings)
-            results.prompts.append(prompt)
+            results.prompts.append(msg)
             results.completions.append(completions)
         return results
 
@@ -334,7 +355,7 @@ class GCGAttack(Attack):
 
         if self.prefix_cache:
             input_embeds = torch.cat(
-                [optim_embeds, self.after_embeds, self.target_embeds], dim=1
+                [optim_embeds, self.post_embeds, self.target_embeds], dim=1
             )
             output = model(
                 inputs_embeds=input_embeds, past_key_values=self.prefix_cache
@@ -342,9 +363,9 @@ class GCGAttack(Attack):
         else:
             input_embeds = torch.cat(
                 [
-                    self.before_embeds,
+                    self.pre_prompt_embeds,
                     optim_embeds,
-                    self.after_embeds,
+                    self.post_embeds,
                     self.target_embeds,
                 ],
                 dim=1,
@@ -375,15 +396,11 @@ class GCGAttack(Attack):
         )[0]
         return optim_ids_onehot_grad
 
-    def init_buffer(self, model, tokenizer):
+    def init_buffer(self, model, init_buffer_ids):
         config = self.config
 
         # Create the attack buffer and initialize the buffer ids
         buffer = AttackBuffer(config.buffer_size)
-
-        init_buffer_ids = tokenizer(
-            config.optim_str_init, add_special_tokens=False, return_tensors="pt"
-        )["input_ids"].to(model.device)
         true_buffer_size = max(1, config.buffer_size)
 
         # Compute the loss on the initial buffer entries
@@ -391,7 +408,7 @@ class GCGAttack(Attack):
             init_buffer_embeds = torch.cat(
                 [
                     model.get_input_embeddings()(init_buffer_ids),
-                    self.after_embeds.repeat(true_buffer_size, 1, 1),
+                    self.post_embeds.repeat(true_buffer_size, 1, 1),
                     self.target_embeds.repeat(true_buffer_size, 1, 1),
                 ],
                 dim=1,
@@ -399,9 +416,9 @@ class GCGAttack(Attack):
         else:
             init_buffer_embeds = torch.cat(
                 [
-                    self.before_embeds.repeat(true_buffer_size, 1, 1),
+                    self.pre_prompt_embeds.repeat(true_buffer_size, 1, 1),
                     model.get_input_embeddings()(init_buffer_ids),
-                    self.after_embeds.repeat(true_buffer_size, 1, 1),
+                    self.post_embeds.repeat(true_buffer_size, 1, 1),
                     self.target_embeds.repeat(true_buffer_size, 1, 1),
                 ],
                 dim=1,
@@ -508,9 +525,9 @@ class AttackBuffer:
 
         if len(self.buffer) < self.size:
             self.buffer.append((loss, optim_ids))
-            return
+        else:
+            self.buffer[-1] = (loss, optim_ids)
 
-        self.buffer[-1] = (loss, optim_ids)
         self.buffer.sort(key=lambda x: x[0])
 
     def get_best_ids(self) -> Tensor:

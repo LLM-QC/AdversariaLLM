@@ -42,7 +42,7 @@ def main(cfg: DictConfig) -> None:
         if cfg.model_name is not None and model_name != cfg.model_name:
             continue
         logging.info(f"Target: {model_name}\n{OmegaConf.to_yaml(model_params)}")
-        model, tokenizer = load_model_and_tokenizer(model_name, cfg, model_params)
+        model, tokenizer = load_model_and_tokenizer(model_name, model_params)
         for dataset_name, dataset_params in cfg.datasets.items():
             if cfg.dataset_name is not None and dataset_name != cfg.dataset_name:
                 continue

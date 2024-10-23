@@ -53,6 +53,10 @@ class Attack:
                 from .ample_gcg import AmpleGCGAttack
 
                 return AmpleGCGAttack
+            case "direct":
+                from .direct import DirectAttack
+
+                return DirectAttack
             case _:
                 raise ValueError(f"Unknown attack: {name}")
 
@@ -63,4 +67,3 @@ class Attack:
         dataset: torch.utils.data.Dataset,
     ) -> AttackResult:
         raise NotImplementedError
-

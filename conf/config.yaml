@@ -7,10 +7,6 @@ defaults:
 
 hydra:
   mode: MULTIRUN
-  # sweeper:
-  #   params:
-  #     attack_name: pgd, gcg, autodan
-  #     datasets.adv_behaviors.idx: range(0, 20)
   run:
     dir: /nfs/staff-ssd/beyer/llm-quick-check/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
   job:

@@ -31,8 +31,13 @@ ample_gcg:
   seed: 0
   prompter_lm:
     id: osunlp/AmpleGCG-llama2-sourced-llama2-7b-chat
+    tokenizer_id: osunlp/AmpleGCG-llama2-sourced-llama2-7b-chat
+    short_name: ample_gcg
+    developer_name: osunlp
     batch_size: 2
-    torch_dtype: int8
+    dtype: int8
+    attn_implmentation: null
+    compile: False
     generation_config:
       num_return_sequences: 200 # number of tries per prompt
       num_beams: 200
@@ -83,3 +88,12 @@ autodan:
   mutation: 0.01
   mutate_model_id: null
   generation_steps: 256 # have to implement this
+direct:
+  name: direct
+  type: discrete
+  placement: null
+  generate_completions: last
+  num_steps: 1
+  seed: 0
+  batch_size: 4
+  generation_steps: 256
