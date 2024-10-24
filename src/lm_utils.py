@@ -233,8 +233,6 @@ def get_batched_losses(
     return losses
 
 
-
-
 def prepare_tokens(tokenizer, prompt: str, target: str, attack: str|None = None, placement: Literal['prompt']|Literal['suffix']="suffix") -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """For many attacks, we need to figure out how exactly to tokenize the input.
     Since only some models add a space or various control tokens, we have to figure
@@ -251,13 +249,10 @@ def prepare_tokens(tokenizer, prompt: str, target: str, attack: str|None = None,
         cais/zephyr_7b_r2d2
         google/gemma-2-2b-it
         HuggingFaceH4/zephyr-7b-beta
-        HuggingFaceH4/zephyr-7b-beta
         meta-llama/Llama-2-7b-chat-hf
         meta-llama/Meta-Llama-3-8B-Instruct
         meta-llama/Meta-Llama-3.1-8B-Instruct
         microsoft/Phi-3-mini-4k-instruct
-        microsoft/Phi-3-mini-4k-instruct
-        mistralai/Mistral-7B-Instruct-v0.3
         mistralai/Mistral-7B-Instruct-v0.3
         qwen/Qwen2-7B-Instruct
 

@@ -6,7 +6,7 @@ pgd:
   num_steps: 100
   seed: 0
   batch_size: 2
-  optim_str_init: "x x x x x x x x x x x x x x x x x x x x"
+  optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
   epsilon: 100000.
   alpha: 0.001
   max_new_tokens: 256
@@ -18,7 +18,7 @@ pgd_one_hot:
   num_steps: 100
   seed: 0
   batch_size: 2
-  optim_str_init: "x x x x x x x x x x x x x x x x x x x x"
+  optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
   epsilon: 100000.
   momentum: 0.5
   alpha: 0.001
@@ -43,7 +43,7 @@ ample_gcg:
       num_beams: 200
       num_beam_groups: 200
       do_sample: false
-      max_new_tokens: 20  # attack length
+      max_new_tokens: 20 # attack length
       min_new_tokens: 20
       diversity_penalty: 1.0
   target_lm:
@@ -57,7 +57,7 @@ gcg:
   num_steps: 250
   seed: 0
   batch_size: 512
-  optim_str_init: "x x x x x x x x x x x x x x x x x x x x"
+  optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
   search_width: 512
   topk: 256
   n_replace: 1
@@ -125,4 +125,3 @@ pair:
   judge_model:
     id: cais/HarmBench-Llama-2-13b-cls
     max_new_tokens: 256
-

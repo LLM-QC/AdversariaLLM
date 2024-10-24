@@ -147,8 +147,6 @@ class GCGAttack(Attack):
             if self.config.allow_non_ascii
             else get_nonascii_toks(tokenizer, device=model.device)
         )
-        print(tokenizer.vocab_size, model.get_input_embeddings().weight.shape)
-
         results = AttackResult([], [], [], [])
         for msg, target in dataset:
             msg: dict[str, str]
@@ -218,7 +216,7 @@ class GCGAttack(Attack):
                                 [
                                     (
                                         pre_prompt_ids.repeat(sampled_ids.shape[0], 1)
-                                        if tokenizer.name_or_path != "meta-llama/Meta-Llama-3-8B-Instruct"
+                                        if "Llama-3-8B-Instruct" not in tokenizer.name_or_path
                                         else torch.tensor([]).to(sampled_ids)
                                     ),
                                     sampled_ids,
@@ -638,9 +636,8 @@ class SubstitutionSelectionStrategy:
 
         if not_allowed_ids is not None:
             grad[:, not_allowed_ids.to(grad.device)] = float("inf")
-        topk_ids = grad.topk(
-            topk, dim=1, largest=False, sorted=False
-        ).indices  # (n_optim_ids, topk)
+        # (n_optim_ids, topk)
+        topk_ids = grad.topk(topk, dim=1, largest=False, sorted=False).indices
 
         sampled_ids_pos = torch.randint(
             0, n_optim_tokens, (search_width, n_replace), device=grad.device

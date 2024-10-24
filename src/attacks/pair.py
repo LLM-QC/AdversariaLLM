@@ -87,23 +87,9 @@ class PAIRAttack(Attack):
             logging.info("Finished getting target responses.")
 
             # Get judge scores
-            judge_scores = [1] * len(
-                target_response_list
-            )
+            judge_scores = [1] * len(target_response_list)
             # TODO: early stopping with judge model
             # judgeLM.score(adv_prompt_list, target_response_list)
-            logging.info("Finished getting judge scores.")
-
-            # logging.info prompts, responses, and scores
-            for i, (prompt, improv, response, score) in enumerate(
-                zip(adv_prompt_list, improv_list, target_response_list, judge_scores)
-            ):
-                logging.info(
-                    f"{i+1}/{self.config.num_streams}\n\n[IMPROVEMENT]:\n{improv} \n"
-                )
-                logging.info(
-                    f"[PROMPT]:\n{prompt} \n\n[RESPONSE]:\n{response}\n\n[SCORE]:\n{score}\n\n"
-                )
             processed_response_list = [
                 process_target_response(target_response, score, prompt)
                 for target_response, score in zip(target_response_list, judge_scores)
@@ -244,7 +230,6 @@ class AttackLM:
         self.max_new_tokens = cfg.max_new_tokens
         self.max_attempts = cfg.max_attempts
         self.top_p = cfg.top_p
-        self.template = None
 
     def get_attack(self, convs_list, prompts_list):
         """
@@ -263,6 +248,7 @@ class AttackLM:
         """
         assert len(convs_list) == len(prompts_list), "Mismatch betw. #convs & #prompts."
 
+        tokenizer = self.tokenizer
         batchsize = len(convs_list)
         indices_to_regenerate = list(range(batchsize))
         valid_outputs = [None] * batchsize
@@ -278,30 +264,27 @@ class AttackLM:
         for conv, prompt in zip(convs_list, prompts_list):
             conv.append({"role": "user", "content": prompt})
             conv.append({"role": "assistant", "content": init_message})
-            full_prompt = self.tokenizer.apply_chat_template(
-                conv, add_generation_prompt=False, tokenize=False
+            full_prompt = tokenizer.apply_chat_template(
+                conv, add_generation_prompt=False, tokenize=False, continue_final_message=True
             )
-            while len(
-                self.tokenizer(full_prompt).input_ids
-            ) + self.max_new_tokens > min(self.tokenizer.model_max_length, 4096):
+            while (len(tokenizer(full_prompt).input_ids) + self.max_new_tokens) > min(
+                tokenizer.model_max_length, 4096
+            ):
                 # maintain system message, remove user+assistant message pairs until we fit
                 # in context window
                 conv = conv[:1] + conv[3:]
                 full_prompt = self.tokenizer.apply_chat_template(
                     conv, add_generation_prompt=False, tokenize=False
                 )
-            # Remove BOS token, will get added again later
-            if self.tokenizer.bos_token and full_prompt.startswith(
-                self.tokenizer.bos_token
-            ):
-                full_prompt = full_prompt.replace(self.tokenizer.bos_token, "", 1)
+            # Remove BOS token, will get added again later if necessary
+            if tokenizer.bos_token and full_prompt.startswith(tokenizer.bos_token):
+                full_prompt = full_prompt.replace(tokenizer.bos_token, "", 1)
 
             full_prompts.append(full_prompt)
 
         for attempt in range(self.max_attempts):
             # Subset conversations based on indices to regenerate
             full_prompts_subset = [full_prompts[i] for i in indices_to_regenerate]
-
             # Generate outputs
             outputs_list = self.model.batched_generate(
                 full_prompts_subset,
@@ -319,9 +302,8 @@ class AttackLM:
 
                 if attack_dict is not None:
                     valid_outputs[orig_index] = attack_dict
-                    convs_list[orig_index][-1][
-                        "content"
-                    ] = json_str  # Update the conversation with valid generation
+                    # Update the conversation with valid generation
+                    convs_list[orig_index][-1]["content"] = json_str
                 else:
                     new_indices_to_regenerate.append(orig_index)
 
@@ -357,9 +339,9 @@ class TargetLM:
         self.temperature = cfg.temperature
         self.max_new_tokens = cfg.max_new_tokens
         self.top_p = cfg.top_p
-        self.template = None
 
     def get_response(self, prompts_list):
+        tokenizer = self.tokenizer
         batchsize = len(prompts_list)
         convs_list = [[] for _ in range(batchsize)]
         full_prompts = []
@@ -369,10 +351,8 @@ class TargetLM:
                 conv, add_generation_prompt=True, tokenize=False
             )
             # Remove BOS token in batch
-            if self.tokenizer.bos_token and full_prompt.startswith(
-                self.tokenizer.bos_token
-            ):
-                full_prompt = full_prompt.replace(self.tokenizer.bos_token, "", 1)
+            if tokenizer.bos_token and full_prompt.startswith(tokenizer.bos_token):
+                full_prompt = full_prompt.replace(tokenizer.bos_token, "", 1)
 
             full_prompts.append(full_prompt)
 
