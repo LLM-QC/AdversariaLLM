@@ -61,6 +61,10 @@ class Attack:
                 from .pair import PAIRAttack
 
                 return PAIRAttack
+            case "human_jailbreaks":
+                from .human_jailbreaks import HumanJailbreaksAttack
+
+                return HumanJailbreaksAttack
             case _:
                 raise ValueError(f"Unknown attack: {name}")
 

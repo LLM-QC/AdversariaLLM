@@ -2,11 +2,11 @@ import gc
 import json
 import logging
 import os
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from dataclasses import asdict
 
 import torch
-from dataclasses import asdict
 from omegaconf import OmegaConf
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from src.attacks import AttackResult
 
@@ -20,7 +20,7 @@ def load_model_and_tokenizer(model_path, model_params):
                 load_in_4bit=True,
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_use_double_quant=True,
-                bnb_4bit_compute_dtype=torch.bfloat16
+                bnb_4bit_compute_dtype=torch.bfloat16,
             )
         elif model_params.dtype == "int8":
             quantization_config = BitsAndBytesConfig(
@@ -29,25 +29,27 @@ def load_model_and_tokenizer(model_path, model_params):
         else:
             raise ValueError(f"Unknown dtype {model_params.dtype}")
 
-        model = AutoModelForCausalLM.from_pretrained(model_path,
-                                                     trust_remote_code=True,
-                                                     quantization_config=quantization_config,).eval()
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            quantization_config=quantization_config,
+        ).eval()
     else:
-        model = (
-            AutoModelForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=getattr(torch, model_params.dtype),
-                trust_remote_code=True,
-                low_cpu_mem_usage=True,
-                device_map="auto",
-            ).eval()
-        )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype=getattr(torch, model_params.dtype),
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
+            device_map="auto",
+        ).eval()
     if model_params.compile:
         model = torch.compile(model)
 
     model.config.short_name = model_params.short_name
     model.config.developer_name = model_params.developer_name
-    tokenizer = AutoTokenizer.from_pretrained(model_params.tokenizer_id, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_params.tokenizer_id, trust_remote_code=True
+    )
     match model_path.lower():
         case path if "oasst-sft-6-llama-30b" in path:
             tokenizer.bos_token_id = 1
@@ -70,17 +72,21 @@ def load_model_and_tokenizer(model_path, model_params):
 
 
 def load_chat_template(template_name):
-    chat_template = open(f'/nfs/staff-ssd/beyer/llm-quick-check/chat_templates/chat_templates/{template_name}.jinja').read()
-    chat_template = chat_template.replace('    ', '').replace('\n', '')
+    chat_template = open(f"/nfs/staff-ssd/beyer/llm-quick-check/chat_templates/chat_templates/{template_name}.jinja").read()
+    chat_template = chat_template.replace("    ", "").replace("\n", "")
     return chat_template
+
+
+def free_vram():
+    for _ in range(3):
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 def log_attack(run_config, result: AttackResult, log_file: str):
     # Create a structured log message as a JSON object
     log_message = {
-        "config": OmegaConf.to_container(
-            OmegaConf.structured(run_config), resolve=True
-        )
+        "config": OmegaConf.to_container(OmegaConf.structured(run_config), resolve=True)
     }
     log_message.update(asdict(result))
     # merge into log file if it exists already

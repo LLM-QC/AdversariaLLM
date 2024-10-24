@@ -32,12 +32,13 @@ ample_gcg:
   prompter_lm:
     id: osunlp/AmpleGCG-llama2-sourced-llama2-7b-chat
     tokenizer_id: osunlp/AmpleGCG-llama2-sourced-llama2-7b-chat
+    chat_template: null
     short_name: ample_gcg
     developer_name: osunlp
     batch_size: 2
-    dtype: int8
+    dtype: bfloat16
     attn_implmentation: null
-    compile: False
+    compile: True
     generation_config:
       num_return_sequences: 200 # number of tries per prompt
       num_beams: 200
@@ -125,3 +126,12 @@ pair:
   judge_model:
     id: cais/HarmBench-Llama-2-13b-cls
     max_new_tokens: 256
+human_jailbreaks:
+  name: human_jailbreaks
+  type: discrete
+  placement: prompt
+  generate_completions: all
+  num_steps: 1
+  seed: 0
+  batch_size: 2
+  max_new_tokens: 256

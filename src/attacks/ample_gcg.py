@@ -7,11 +7,10 @@ import torch
 import torch.nn as nn
 from accelerate.utils import find_executable_batch_size
 from tqdm import trange
-from transformers import BitsAndBytesConfig, GenerationConfig
+from transformers import GenerationConfig
 
-from src.io_utils import load_model_and_tokenizer
-from src.lm_utils import (get_batched_completions, get_batched_losses,
-                          prepare_tokens)
+from src.io_utils import free_vram, load_model_and_tokenizer
+from src.lm_utils import get_batched_completions, get_batched_losses, prepare_tokens
 
 from .attack import Attack, AttackResult
 
@@ -37,11 +36,16 @@ class AmpleGCGAttack(Attack):
     def __init__(self, config: AmpleGCGConfig):
         super().__init__(config)
 
+    @torch.no_grad()
     def run(self, model: torch.nn.Module, tokenizer, dataset) -> AttackResult:
-
         results = AttackResult([], [], [], [])
         for msg, target in dataset:
+            # Temporarily move target model to cpu
+            device = model.device
+            model.cpu()
+            free_vram()
             attacks = self.get_attack_prompts(f"### Query:{msg['content']} ### Prompt:")
+            model.to(device)
             losses = find_executable_batch_size(
                 self.get_losses, self.config.target_lm.batch_size
             )(msg, attacks, target, model, tokenizer)
@@ -55,9 +59,11 @@ class AmpleGCGAttack(Attack):
         return results
 
     def get_attack_prompts(self, msg):
-        prompter_model = PrompterModel(self.config.prompter_lm).to("cuda")
+        prompter_model = PrompterModel(self.config.prompter_lm)
         prompter_model.eval()
-        return prompter_model.run([msg])
+        attacks = prompter_model.run([msg])
+        free_vram()
+        return attacks
 
     @staticmethod
     def _format_prompt(prompt, attack, tokenizer):
@@ -68,17 +74,18 @@ class AmpleGCGAttack(Attack):
         )
 
     # q_s questions, p_s prompts
-    def get_completions(
-        self, batch_size, prompt, attacks, model, tokenizer
-    ):
+    def get_completions(self, batch_size, prompt, attacks, model, tokenizer):
         outputs = []
         for i in trange(0, len(attacks), batch_size, desc="Target Model"):
-            token_list = [prepare_tokens(
-                tokenizer,
-                prompt=prompt["content"],
-                target="ZZZZZ",  #  need dummy target (probably)
-                attack=attack,
-            ) for attack in attacks[i : i + batch_size]]
+            token_list = [
+                prepare_tokens(
+                    tokenizer,
+                    prompt=prompt["content"],
+                    target="ZZZZZ",  #  need dummy target (probably)
+                    attack=attack,
+                )
+                for attack in attacks[i : i + batch_size]
+            ]
             token_list = [
                 torch.cat([a, b, c, d], dim=0) for a, b, c, d, _ in token_list
             ]
@@ -94,12 +101,15 @@ class AmpleGCGAttack(Attack):
     def get_losses(self, batch_size, prompt, attacks, target, model, tokenizer):
         outputs = []
         for i in trange(0, len(attacks), batch_size, desc="Target Model"):
-            token_list = [prepare_tokens(
-                tokenizer,
-                prompt=prompt["content"],
-                target="ZZZZZ",  # need dummy target (probably)
-                attack=attack,
-            ) for attack in attacks[i : i + batch_size]]
+            token_list = [
+                prepare_tokens(
+                    tokenizer,
+                    prompt=prompt["content"],
+                    target="ZZZZZ",  # need dummy target (probably)
+                    attack=attack,
+                )
+                for attack in attacks[i : i + batch_size]
+            ]
             target_lengths = [e.size(0) for a, b, c, d, e in token_list]
             token_list = [torch.cat(t, dim=0) for t in token_list]
             targets = [t.roll(-1, 0) for t in token_list]
@@ -112,31 +122,6 @@ class AmpleGCGAttack(Attack):
             losses = [l[-tl:].mean().item() for l, tl in zip(losses, target_lengths)]
             outputs.extend(losses)
         return outputs
-
-
-def cal_loss_avg(loss):
-    non_zero_mask = loss != 0
-
-    average_ignoring_zeros = torch.zeros(loss.size(0))
-    for i in range(loss.size(0)):
-        non_zero_values = loss[i, non_zero_mask[i]]
-        if len(non_zero_values) > 0:
-            average_ignoring_zeros[i] = non_zero_values.mean()
-        else:
-            average_ignoring_zeros[i] = float("nan")
-    return average_ignoring_zeros
-
-
-def check_torch_dtype(config):
-    kwargs = {}
-    if config.torch_dtype == "bf16":
-        kwargs["torch_dtype"] = torch.bfloat16
-    elif config.torch_dtype == "fp16":
-        kwargs["torch_dtype"] = torch.float16
-    elif config.torch_dtype == "int8":
-        kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
-        kwargs["trust_remote_code"] = True
-    return kwargs
 
 
 class PrompterModel(nn.Module):
@@ -165,7 +150,6 @@ class PrompterModel(nn.Module):
         return output_text
 
     # q_s questions, p_s prompts
-    @torch.no_grad()
     def run(self, q_s):
         outputs = []
         batch_size = self.batch_size
