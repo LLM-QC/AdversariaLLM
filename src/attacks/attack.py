@@ -33,22 +33,10 @@ class Attack:
     @classmethod
     def from_name(cls, name):
         match name:
-            case "gcg":
-                from .gcg import GCGAttack
-
-                return GCGAttack
             case "autodan":
                 from .autodan import AutoDANAttack
 
                 return AutoDANAttack
-            case "pgd":
-                from .pgd import PGDAttack
-
-                return PGDAttack
-            case "pgd_one_hot":
-                from .pgd_one_hot import PGDOneHotAttack
-
-                return PGDOneHotAttack
             case "ample_gcg":
                 from .ample_gcg import AmpleGCGAttack
 
@@ -57,14 +45,26 @@ class Attack:
                 from .direct import DirectAttack
 
                 return DirectAttack
-            case "pair":
-                from .pair import PAIRAttack
+            case "gcg":
+                from .gcg import GCGAttack
 
-                return PAIRAttack
+                return GCGAttack
             case "human_jailbreaks":
                 from .human_jailbreaks import HumanJailbreaksAttack
 
                 return HumanJailbreaksAttack
+            case "pair":
+                from .pair import PAIRAttack
+
+                return PAIRAttack
+            case "pgd":
+                from .pgd import PGDAttack
+
+                return PGDAttack
+            case "pgd_one_hot":
+                from .pgd_one_hot import PGDOneHotAttack
+
+                return PGDOneHotAttack
             case _:
                 raise ValueError(f"Unknown attack: {name}")
 
