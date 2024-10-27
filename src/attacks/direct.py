@@ -10,6 +10,7 @@ class DirectAttack(Attack):
     def __init__(self, config):
         super().__init__(config)
 
+    @torch.no_grad
     def run(
         self,
         model: transformers.AutoModelForCausalLM,

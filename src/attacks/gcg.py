@@ -81,9 +81,7 @@ def get_nonascii_toks(tokenizer, device="cpu"):
 
 def mellowmax(t: Tensor, alpha=1.0, dim=-1):
     return (
-        1.0
-        / alpha
-        * (
+        1.0 / alpha * (
             torch.logsumexp(alpha * t, dim=dim)
             - torch.log(torch.tensor(t.shape[-1], dtype=t.dtype, device=t.device))
         )

@@ -3,8 +3,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-import torch.utils
 import transformers
+from torch.utils.data import Dataset
 
 
 def set_seed(seed):
@@ -72,6 +72,6 @@ class Attack:
         self,
         model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
-        dataset: torch.utils.data.Dataset,
+        dataset: Dataset,
     ) -> AttackResult:
         raise NotImplementedError

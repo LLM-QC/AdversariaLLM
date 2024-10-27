@@ -48,9 +48,11 @@ def load_model_and_tokenizer(model_path, model_params):
     model.config.short_name = model_params.short_name
     model.config.developer_name = model_params.developer_name
     tokenizer = AutoTokenizer.from_pretrained(
-        model_params.tokenizer_id, trust_remote_code=True
+        model_params.tokenizer_id, trust_remote_code=True,
+        truncation_side="left",
+        padding_side="left"
     )
-    match model_path.lower():
+    match model_params.tokenizer_id.lower():
         case path if "oasst-sft-6-llama-30b" in path:
             tokenizer.bos_token_id = 1
             tokenizer.unk_token_id = 0
@@ -61,11 +63,16 @@ def load_model_and_tokenizer(model_path, model_params):
             tokenizer.pad_token = tokenizer.unk_token
         case path if "vicuna" in path:
             tokenizer.pad_token = tokenizer.eos_token
+        case path if "gemma-2" in path:
+            tokenizer.model_max_length = 8192
+        case path if 'mistral-7b-instruct-v0.3' in path:
+            tokenizer.model_max_length = 32768
+        case path if 'zephyr' in path:
+            tokenizer.model_max_length = 32768
 
     if model_params.chat_template is not None:
         tokenizer.chat_template = load_chat_template(model_params.chat_template)
 
-    tokenizer.padding_side = "left"
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token
     return model, tokenizer
