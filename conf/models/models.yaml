@@ -6,6 +6,7 @@ google/gemma-2-2b-it:
   compile: False
   dtype: bfloat16
   chat_template: gemma-it
+  trust_remote_code: True
 mistralai/Mistral-7B-Instruct-v0.3:
   id: mistralai/Mistral-7B-Instruct-v0.3
   tokenizer_id: mistralai/Mistral-7B-Instruct-v0.3
@@ -14,6 +15,7 @@ mistralai/Mistral-7B-Instruct-v0.3:
   compile: False
   dtype: bfloat16
   chat_template: mistral-instruct
+  trust_remote_code: True
 meta-llama/Meta-Llama-3.1-8B-Instruct:
   id: meta-llama/Meta-Llama-3.1-8B-Instruct
   tokenizer_id: meta-llama/Meta-Llama-3.1-8B-Instruct
@@ -22,6 +24,7 @@ meta-llama/Meta-Llama-3.1-8B-Instruct:
   compile: False
   dtype: bfloat16
   chat_template: llama-3-instruct
+  trust_remote_code: True
 qwen/Qwen2-7B-Instruct:
   id: qwen/Qwen2-7B-Instruct
   tokenizer_id: qwen/Qwen2-7B-Instruct
@@ -30,6 +33,7 @@ qwen/Qwen2-7B-Instruct:
   compile: False
   dtype: bfloat16
   chat_template: null
+  trust_remote_code: True
 HuggingFaceH4/zephyr-7b-beta:
   id: HuggingFaceH4/zephyr-7b-beta
   tokenizer_id: HuggingFaceH4/zephyr-7b-beta
@@ -38,6 +42,7 @@ HuggingFaceH4/zephyr-7b-beta:
   compile: False
   dtype: bfloat16
   chat_template: zephyr
+  trust_remote_code: True
 meta-llama/Llama-2-7b-chat-hf:
   id: meta-llama/Llama-2-7b-chat-hf
   tokenizer_id: meta-llama/Llama-2-7b-chat-hf
@@ -46,6 +51,7 @@ meta-llama/Llama-2-7b-chat-hf:
   compile: False
   dtype: bfloat16
   chat_template: llama-2-chat
+  trust_remote_code: True
 ContinuousAT/Llama-2-7B-CAT:
   id: ContinuousAT/Llama-2-7B-CAT
   tokenizer_id: meta-llama/Llama-2-7b-chat-hf
@@ -55,6 +61,7 @@ ContinuousAT/Llama-2-7B-CAT:
   compile: False
   dtype: bfloat16
   chat_template: llama-2-chat
+  trust_remote_code: True
 ContinuousAT/Zephyr-CAT:
   id: ContinuousAT/Zephyr-CAT
   tokenizer_id: HuggingFaceH4/zephyr-7b-beta
@@ -64,6 +71,7 @@ ContinuousAT/Zephyr-CAT:
   compile: False
   dtype: bfloat16
   chat_template: zephyr
+  trust_remote_code: True
 ContinuousAT/Phi-CAT:
   id: ContinuousAT/Phi-CAT
   tokenizer_id: microsoft/Phi-3-mini-4k-instruct
@@ -72,14 +80,16 @@ ContinuousAT/Phi-CAT:
   compile: False
   dtype: bfloat16
   chat_template: phi-3
+  trust_remote_code: False  # can't use spda otherwise for some reason!
 microsoft/Phi-3-mini-4k-instruct:
   id: microsoft/Phi-3-mini-4k-instruct
   tokenizer_id: microsoft/Phi-3-mini-4k-instruct
   short_name: Phi
-  developer_name: ContinuousAT
+  developer_name: Microsoft
   compile: False
   dtype: bfloat16
-  chat_template: phi3
+  chat_template: phi-3
+  trust_remote_code: False  # can't use spda otherwise for some reason!
 cais/zephyr_7b_r2d2:
   id: cais/zephyr_7b_r2d2
   tokenizer_id: cais/zephyr_7b_r2d2
@@ -88,6 +98,7 @@ cais/zephyr_7b_r2d2:
   compile: False
   dtype: bfloat16
   chat_template: zephyr
+  trust_remote_code: True
 GraySwanAI/Llama-3-8B-Instruct-RR:
   id: GraySwanAI/Llama-3-8B-Instruct-RR
   tokenizer_id: GraySwanAI/Llama-3-8B-Instruct-RR
@@ -96,6 +107,7 @@ GraySwanAI/Llama-3-8B-Instruct-RR:
   compile: False
   dtype: bfloat16
   chat_template: llama-3-instruct
+  trust_remote_code: True
 GraySwanAI/Mistral-7B-Instruct-RR:
   id: GraySwanAI/Mistral-7B-Instruct-RR
   tokenizer_id: GraySwanAI/Mistral-7B-Instruct-RR
@@ -104,6 +116,7 @@ GraySwanAI/Mistral-7B-Instruct-RR:
   compile: False
   dtype: bfloat16
   chat_template: mistral-instruct
+  trust_remote_code: True
 lmsys/vicuna-13b-v1.5:
   id: lmsys/vicuna-13b-v1.5
   tokenizer_id: lmsys/vicuna-13b-v1.5
@@ -112,3 +125,4 @@ lmsys/vicuna-13b-v1.5:
   compile: False
   dtype: bfloat16
   chat_template: vicuna
+  trust_remote_code: True

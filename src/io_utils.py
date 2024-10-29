@@ -38,7 +38,7 @@ def load_model_and_tokenizer(model_path, model_params):
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
             torch_dtype=getattr(torch, model_params.dtype),
-            trust_remote_code=True,
+            trust_remote_code=model_params.trust_remote_code,
             low_cpu_mem_usage=True,
             device_map="auto",
         ).eval()
@@ -48,7 +48,8 @@ def load_model_and_tokenizer(model_path, model_params):
     model.config.short_name = model_params.short_name
     model.config.developer_name = model_params.developer_name
     tokenizer = AutoTokenizer.from_pretrained(
-        model_params.tokenizer_id, trust_remote_code=True,
+        model_params.tokenizer_id,
+        trust_remote_code=model_params.trust_remote_code,
         truncation_side="left",
         padding_side="left"
     )

@@ -38,6 +38,7 @@ ample_gcg:
     batch_size: 2
     dtype: bfloat16
     attn_implmentation: null
+    trust_remote_code: True
     compile: True
     generation_config:
       num_return_sequences: 200 # number of tries per prompt
@@ -88,7 +89,7 @@ autodan:
   num_points: 5
   mutation: 0.01
   mutate_model_id: null
-  max_new_tokens: 256 # have to implement this
+  max_new_tokens: 256
 direct:
   name: direct
   type: discrete
@@ -112,6 +113,7 @@ pair:
     tokenizer_id: lmsys/vicuna-13b-v1.5
     dtype: bfloat16
     compile: false
+    trust_remote_code: True
     short_name: vicuna
     developer_name: lmsys
     max_attempts: 5
