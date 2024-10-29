@@ -74,6 +74,9 @@ class PAIRAttack(Attack):
             extracted_attack_list = attack_model.get_attack(
                 convs_list, processed_response_list
             )
+            if any([attack is None for attack in extracted_attack_list]):
+                logging.info("Failed to generate output. Terminating.")
+                break
             logging.info("Finished getting adversarial prompts.")
 
             # Extract prompts and improvements

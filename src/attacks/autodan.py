@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from accelerate.utils import find_executable_batch_size
 from tqdm import trange
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from src.lm_utils import get_batched_completions, get_batched_losses, prepare_tokens
 
 from .attack import Attack, AttackResult
 
@@ -181,6 +182,7 @@ class AutoDANAttack(Attack):
     def __init__(self, config: AutoDANConfig):
         super().__init__(config)
 
+    @torch.no_grad
     def run(self, model, tokenizer, dataset) -> AttackResult:
         """Run the AutoDAN attack against a given model and dataset."""
         if self.config.mutate_model_id is not None:
@@ -215,60 +217,23 @@ class AutoDANAttack(Attack):
             early_stopping_threshold = 10
 
             # ===== init target embeds =====
-            embed_layer = model.get_input_embeddings()
-            target_ids = tokenizer(
-                [target], add_special_tokens=False, return_tensors="pt"
-            ).input_ids.to(model.device)
-            target_embeds = embed_layer(target_ids)
-
             attacks = []
             losses = []
-            completions = []
             current_loss = None
 
-            def chat_template_to_tokens(
-                templates: list[dict[str, str]] | list[list[dict[str, str]]]
-            ) -> torch.Tensor:
-                templates = tokenizer.apply_chat_template(
-                    templates, tokenize=False, add_generation_prompt=True
-                )
-
-                # Remove BOS token in batch
-                for j in range(len(templates)):
-                    if tokenizer.bos_token and templates[j].startswith(tokenizer.bos_token):
-                        templates[j] = templates[j].replace(tokenizer.bos_token, "", 1)
-
-                inputs = (
-                    tokenizer(
-                        templates,
-                        padding=True,
-                        add_special_tokens=False,
-                        return_tensors="pt",
-                    )
-                    .to(model.device)
-                    .input_ids
-                )
-                return inputs
-
             for step in (pbar := trange(self.config.num_steps)):
-                candidates = [
-                    [{"role": "user", "content": prefix + msg["content"]}]
-                    for prefix in optim_strings[: self.config.batch_size]
-                ]
-                adv_prompt_tokens = chat_template_to_tokens(candidates)
+                tokens = [prepare_tokens(tokenizer, c, target, msg['content']) for c in optim_strings[: self.config.batch_size]]
 
-                adv_prompt_embeds = embed_layer(adv_prompt_tokens.to(model.device))
-                inputs_embeds = torch.cat(
-                    [
-                        adv_prompt_embeds,
-                        target_embeds.repeat(self.config.batch_size, 1, 1),
-                    ],
-                    dim=1,
-                )
-                loss = find_executable_batch_size(
-                    self.compute_candidates_loss, forward_batch_size
-                )(model, inputs_embeds, target_ids)
-
+                def batchify(batch_size, tokens):
+                    losses = []
+                    for i in range(0, len(tokens), batch_size):
+                        token_list = [torch.cat([a, b, c, d, e], dim=0) for a,b,c,d,e in tokens[i:i+batch_size]]
+                        targets = [t.roll(-1, 0) for t in token_list]
+                        loss = get_batched_losses(model, targets, token_list=token_list)
+                        loss = [l[-tl:].mean().item() for l, tl in zip(loss, [e.size(0) for a,b,c,d,e in tokens])]
+                        losses.extend(loss)
+                    return torch.tensor(losses)
+                loss = find_executable_batch_size(batchify, forward_batch_size)(tokens)
 
                 best_new_adv_prefix_id = loss.argmin()
                 best_new_adv_prefix = optim_strings[best_new_adv_prefix_id]
@@ -297,73 +262,34 @@ class AutoDANAttack(Attack):
                     mutate_model=mutate_model,
                 )
 
-                del adv_prompt_embeds, inputs_embeds, loss
-                torch.cuda.empty_cache()
-                gc.collect()
-
             # ====== Generate completions ======
-            if self.config.generate_completions == "all":
-                candidates = [
-                    [{"role": "user", "content": prefix + msg["content"]}]
-                    for prefix in attacks
-                ]
-            elif self.config.generate_completions == "best":
-                best_attack_id = np.argmin(losses)
-                candidates = [
-                    [
-                        {
-                            "role": "user",
-                            "content": attacks[best_attack_id] + msg["content"],
-                        }
+            match self.config.generate_completions:
+                case "all":
+                    candidates = [
+                        prefix + msg["content"]
+                        for prefix in attacks
                     ]
-                ]
-            elif self.config.generate_completions == "last":
-                candidates = [
-                    [{"role": "user", "content": attacks[-1] + msg["content"]}]
-                ]
+                case "best":
+                    best_attack_id = np.argmin(losses)
+                    candidates = [attacks[best_attack_id] + msg["content"]]
+                case "last":
+                    candidates = [attacks[-1] + msg["content"]]
+                case _:
+                    raise ValueError(f"Unknown generate_completions: {self.config.generate_completions}")
 
-            with torch.no_grad():
-                adv_prompt_tokens = chat_template_to_tokens(candidates)
-                output = model.generate(
-                    adv_prompt_tokens,
-                    pad_token_id=tokenizer.eos_token_id,
-                    max_new_tokens=256,
-                )
-            # Extract only the newly generated tokens
-            new_tokens = output[:, adv_prompt_tokens.size(1) :]
-            completions = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+            adv_prompt_tokens = [torch.cat(prepare_tokens(tokenizer, c, target, "")[:4]) for c in candidates]
+            completions = get_batched_completions(
+                model,
+                tokenizer,
+                token_list=adv_prompt_tokens,
+                max_new_tokens=self.config.max_new_tokens,
+                use_cache=True
+            )
             results.losses.append(losses)
             results.attacks.append(attacks)
             results.prompts.append(msg)
             results.completions.append(completions)
         return results
-
-    @staticmethod
-    def compute_candidates_loss(forward_batch_size, model, inputs_embeds, target_ids):
-        all_losses = []
-
-        for i in range(0, inputs_embeds.shape[0], forward_batch_size):
-            with torch.no_grad():
-                outputs = model(inputs_embeds=inputs_embeds[i : i + forward_batch_size])
-            logits = outputs.logits
-
-            # Shift so that tokens < n predict n
-            tmp = inputs_embeds.shape[1] - target_ids.shape[1]
-            shift_logits = logits[..., tmp - 1 : -1, :].contiguous()
-            shift_labels = target_ids.repeat(forward_batch_size, 1)
-            # Flatten the tokens
-            loss = (
-                F.cross_entropy(
-                    shift_logits.view(-1, shift_logits.size(-1)),
-                    shift_labels.view(-1),
-                    reduction="none",
-                )
-                .view(forward_batch_size, -1)
-                .mean(dim=1)
-            )
-            all_losses.append(loss)
-
-        return torch.cat(all_losses)
 
     def sample_control(
         self,
