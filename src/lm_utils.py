@@ -16,7 +16,7 @@ def get_batched_completions(
     token_list=None,
     max_new_tokens: int = 256,
     return_tokens=False,
-    padding_side='right',
+    padding_side="right",
     use_cache=False,
 ) -> list[str] | torch.Tensor:
     """
@@ -130,7 +130,7 @@ def get_batched_completions(
                 model(
                     inputs_embeds=padded_embeddings[:, : next_token_idx.min() - 1],
                     past_key_values=past_key_values,
-                    use_cache=use_cache,
+                    use_cache=True,
                 )
             for i in range(max_new_tokens):
                 # Caching with right padding is a bit tricky:
@@ -141,7 +141,7 @@ def get_batched_completions(
                 outputs = model(
                     inputs_embeds=padded_embeddings[:, next_token_idx.min() - 1 : next_token_idx.max()],
                     past_key_values=past_key_values,
-                    use_cache=use_cache,
+                    use_cache=True,
                 )
                 next_tokens = outputs.logits.argmax(dim=-1)[
                     torch.arange(B), next_token_idx - next_token_idx.min()
@@ -158,7 +158,7 @@ def get_batched_completions(
                 next_token_idx += 1
         else:
             for i in range(max_new_tokens):
-                outputs = model(inputs_embeds=padded_embeddings[:, :next_token_idx.max()])
+                outputs = model(inputs_embeds=padded_embeddings[:, : next_token_idx.max()])
                 next_tokens = outputs.logits.argmax(dim=-1)[torch.arange(B), next_token_idx - 1]
                 padded_embeddings[torch.arange(B), next_token_idx] = (
                     model.get_input_embeddings()(next_tokens).detach()
@@ -182,7 +182,7 @@ def get_batched_losses(
     targets,
     embedding_list=None,
     token_list=None,
-    padding_side='right',
+    padding_side="right",
 ) -> torch.Tensor:
     """
     Get per-timestep losses for multiple ragged prompts in a single batch.
@@ -215,7 +215,7 @@ def get_batched_losses(
 
     # We first pad the embeddings to the maximum context length of the model.
     B = len(embedding_list)
-    if padding_side == 'left':
+    if padding_side == "left":
         print("Warning: Padding side 'left' is not recommended for get_batched_losses as it may yield nans.")
         # Add left padding
         embeddings = pad_sequence(
@@ -240,10 +240,13 @@ def get_batched_losses(
         ).to(model.device)
         position_ids = torch.stack(
             [
-                torch.cat([torch.zeros(pl["padding"]), torch.arange(pl["generation"])])
+                torch.cat(
+                    [torch.zeros(pl["padding"]), torch.arange(pl["generation"])]
+                )
                 for pl in lengths
             ]
         ).long().to(model.device)
+
         outputs = model(
             inputs_embeds=embeddings,
             attention_mask=attention_mask,
@@ -255,8 +258,8 @@ def get_batched_losses(
             reduction="none",
         )
         losses = losses.view(B, -1)
-        losses = [losses[i, -t.size(0):-1] for i, t in enumerate(targets)]
-    elif padding_side == 'right':
+        losses = [losses[i, -t.size(0) : -1] for i, t in enumerate(targets)]
+    elif padding_side == "right":
         # Add right padding
         embeddings = pad_sequence(
             [e for e in embedding_list], batch_first=True, padding_value=0
@@ -271,14 +274,20 @@ def get_batched_losses(
             reduction="none",
         )
         losses = losses.view(B, -1)
-        losses = [losses[i, :t.size(0)-1] for i, t in enumerate(targets)]
+        losses = [losses[i, : t.size(0) - 1] for i, t in enumerate(targets)]
     else:
         raise ValueError(f"Unknown padding_side: {padding_side}")
 
     return losses
 
 
-def prepare_tokens(tokenizer, prompt: str, target: str, attack: str|None = None, placement: Literal['prompt']|Literal['suffix']="suffix") -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+def prepare_tokens(
+    tokenizer,
+    prompt: str,
+    target: str,
+    attack: str | None = None,
+    placement: Literal["prompt", "suffix"] = "suffix",
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """For many attacks, we need to figure out how exactly to tokenize the input.
     Since only some models add a space or various control tokens, we have to figure
     out the exact format. We want to make sure that the first generated token is
@@ -318,11 +327,15 @@ def prepare_tokens(tokenizer, prompt: str, target: str, attack: str|None = None,
     """
     if placement == "prompt":
         attack, prompt = prompt, ""
-    else:
-        assert attack is not None
+    elif attack is None:
+        raise ValueError("If placement is 'suffix', attack must be provided.")
 
     def make_random_chats(n, k=5):
-        generate_random_string = lambda: "".join(random.choices(" ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", k=k))
+        generate_random_string = lambda: "".join(
+            random.choices(
+                " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", k=k
+            )
+        )
 
         return [
             [
@@ -346,6 +359,7 @@ def prepare_tokens(tokenizer, prompt: str, target: str, attack: str|None = None,
                 if not prefix:
                     return []
             return prefix
+
         def longest_common_suffix(sequences):
             if not sequences:
                 return []
@@ -356,10 +370,11 @@ def prepare_tokens(tokenizer, prompt: str, target: str, attack: str|None = None,
                 while i <= min_len and suffix[-i] == seq[-i]:
                     i += 1
                 if i > 1:
-                    suffix = suffix[-(i-1):]
+                    suffix = suffix[-(i - 1) :]
                 else:
                     return []
             return suffix
+
         def longest_common_subsequence(sequences):
             if not sequences:
                 return []
@@ -368,13 +383,17 @@ def prepare_tokens(tokenizer, prompt: str, target: str, attack: str|None = None,
             # Start with the longest possible substrings and decrease length
             for length in range(n, 0, -1):
                 for start in range(n - length + 1):
-                    candidate = reference[start:start+length]
+                    candidate = reference[start : start + length]
                     if all(
-                        any(candidate == seq[i:i+length] for i in range(len(seq) - length + 1))
+                        any(
+                            candidate == seq[i : i + length]
+                            for i in range(len(seq) - length + 1)
+                        )
                         for seq in sequences[1:]
                     ):
                         return candidate
             return []
+
         # Convert tensors to lists
         sequences = [vec.tolist() for vec in vectors]
         # Find the longest common prefix
@@ -383,13 +402,14 @@ def prepare_tokens(tokenizer, prompt: str, target: str, attack: str|None = None,
         suffix = longest_common_suffix(sequences)
         # Trim the prefix and suffix from sequences
         sequences_trimmed = [
-            seq[len(prefix):len(seq)-len(suffix) if len(suffix) > 0 else None]
+            seq[len(prefix) : len(seq) - len(suffix) if len(suffix) > 0 else None]
             for seq in sequences
         ]
         # Find the longest common subsequence in the trimmed sequences
         middle = longest_common_subsequence(sequences_trimmed)
         return torch.tensor(prefix), torch.tensor(middle), torch.tensor(suffix)
-    # create random messages, this is ugly but fast
+
+    # Generate random messages to find tokenizer patterns, this is ugly but fast
     num_messages = 100
     test_chats = make_random_chats(num_messages)
     templates = tokenizer.apply_chat_template(
@@ -400,52 +420,68 @@ def prepare_tokens(tokenizer, prompt: str, target: str, attack: str|None = None,
     for i, template in enumerate(templates):
         if tokenizer.bos_token and template.startswith(tokenizer.bos_token):
             templates[i] = template.replace(tokenizer.bos_token, "", 1)
-    tokenized = [tokenizer(
-        template, return_tensors="pt", add_special_tokens=True
-    ).input_ids for template in templates]
 
-    pre_tokens, post_tokens, suffix_tokens = extract_prefix_middle_suffix([tok[0] for tok in tokenized])
+    tokenized = [
+        tokenizer(template, return_tensors="pt", add_special_tokens=True).input_ids
+        for template in templates
+    ]
+
+    pre_tokens, post_tokens, suffix_tokens = extract_prefix_middle_suffix(
+        [tok[0] for tok in tokenized]
+    )
+
+    # Now we tokenize the actual attack and prompt
+    def tokenize_chat(chat: list[dict[str, str]], tokenizer) -> torch.Tensor:
+        template = tokenizer.apply_chat_template(
+            chat, tokenize=False, add_generation_prompt=False
+        )
+        if tokenizer.bos_token and template.startswith(tokenizer.bos_token):
+            template = template.replace(tokenizer.bos_token, "", 1)
+
+        input_ids = tokenizer(
+            template, return_tensors="pt", add_special_tokens=True
+        ).input_ids[0]
+        return input_ids
 
     chat = [
         {"role": "user", "content": prompt + attack},
         {"role": "assistant", "content": target},
     ]
-    template = tokenizer.apply_chat_template(
-        chat, tokenize=False, add_generation_prompt=False
-    )
-    if tokenizer.bos_token and template.startswith(tokenizer.bos_token):
-        template = template.replace(tokenizer.bos_token, "", 1)
+    tokenized_together = tokenize_chat(chat, tokenizer)
 
-    tokenized_together = tokenizer(
-        template, return_tensors="pt", add_special_tokens=True
-    ).input_ids
-
-    prompt_attack_post_target = tokenized_together[0, len(pre_tokens): -len(suffix_tokens)]
+    # We now cut the tokenized sequence into parts step-by-step.
+    # First, we remove the prefix and suffix tokens, as we already know the prefix and
+    # don't neeed the suffix.
+    prompt_attack_post_target = tokenized_together[len(pre_tokens) : -len(suffix_tokens)]
+    # We now look for the post tokens. These are between [prompt + attack] and [target].
     prompt_attack_tokens = None
-    for i in range(max(len(prompt_attack_post_target)-len(post_tokens), 0)):
-        if torch.all(prompt_attack_post_target[i:i+len(post_tokens)] == post_tokens):
-            prompt_attack_tokens, target_tokens = prompt_attack_post_target[:i], prompt_attack_post_target[i+len(post_tokens):]
+    for i in range(max(len(prompt_attack_post_target) - len(post_tokens), 0)):
+        if torch.all(
+            prompt_attack_post_target[i : i + len(post_tokens)] == post_tokens
+        ):
+            prompt_attack_tokens, target_tokens = (
+                prompt_attack_post_target[:i],
+                prompt_attack_post_target[i + len(post_tokens) :],
+            )
             break
     else:
-        raise ValueError(f"Unable to find consistent tokenizer patterns for {tokenizer.name_or_path}")
+        raise ValueError(
+            f"Unable to find consistent tokenizer patterns for {tokenizer.name_or_path}"
+        )
 
     chat_no_attack = [
         {"role": "user", "content": prompt},
         {"role": "assistant", "content": target},
     ]
-    template_no_attack = tokenizer.apply_chat_template(
-        chat_no_attack, tokenize=False, add_generation_prompt=False
+    tokenized_together_no_attack = tokenize_chat(chat_no_attack, tokenizer)
+
+    attack_length = len(tokenized_together) - len(tokenized_together_no_attack)
+
+    prompt_tokens, attack_tokens = torch.tensor_split(
+        prompt_attack_tokens, [-attack_length]
     )
-    if tokenizer.bos_token and template_no_attack.startswith(tokenizer.bos_token):
-        template_no_attack = template_no_attack.replace(tokenizer.bos_token, "", 1)
-
-    tokenized_together_no_attack = tokenizer(
-        template_no_attack, return_tensors="pt", add_special_tokens=True
-    ).input_ids
-    attack_length = len(tokenized_together[0]) - len(tokenized_together_no_attack[0])
-
-    prompt_tokens, attack_tokens = torch.tensor_split(prompt_attack_tokens, [-attack_length])
-    if 'llama-2' in tokenizer.name_or_path.lower():
+    if "llama-2" in tokenizer.name_or_path.lower():
         # LLama 2 models have incorrect templating and need to be fixed manually
         post_tokens = torch.cat([post_tokens, torch.tensor([29871])])
+
     return pre_tokens, prompt_tokens, attack_tokens, post_tokens, target_tokens

@@ -2,10 +2,10 @@ pgd:
   name: pgd
   type: continuous
   placement: suffix
-  generate_completions: last
+  generate_completions: all
   num_steps: 100
   seed: 0
-  batch_size: 4
+  batch_size: 16
   optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
   epsilon: 100000.
   alpha: 0.001
@@ -14,7 +14,7 @@ pgd_one_hot:
   name: pgd_one_hot
   type: continuous
   placement: suffix
-  generate_completions: last
+  generate_completions: all
   num_steps: 100
   seed: 0
   batch_size: 2
@@ -55,7 +55,7 @@ gcg:
   name: gcg
   type: discrete
   placement: suffix
-  generate_completions: last
+  generate_completions: all
   num_steps: 250
   seed: 0
   batch_size: 512
@@ -78,7 +78,7 @@ autodan:
   name: autodan
   type: discrete
   placement: prefix
-  generate_completions: last
+  generate_completions: all
   num_steps: 100
   seed: 0
   batch_size: 64
@@ -94,7 +94,7 @@ direct:
   name: direct
   type: discrete
   placement: null
-  generate_completions: last
+  generate_completions: all
   num_steps: 1
   seed: 0
   batch_size: 4

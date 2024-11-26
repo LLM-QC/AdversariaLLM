@@ -73,7 +73,6 @@ class AmpleGCGAttack(Attack):
             add_generation_prompt=True,
         )
 
-    # q_s questions, p_s prompts
     def get_completions(self, batch_size, prompt, attacks, model, tokenizer):
         outputs = []
         for i in trange(0, len(attacks), batch_size, desc="Target Model"):

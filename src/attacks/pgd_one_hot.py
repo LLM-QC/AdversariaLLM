@@ -102,6 +102,7 @@ class PGDOneHotAttack(Attack):
         num_examples = x.size(0)
         losses = [[] for _ in range(num_examples)]
         completions = [[] for _ in range(num_examples)]
+        perturbed_embeddings_list = [[] for _ in range(num_examples)]
         emb = model.get_input_embeddings().weight
         # Perform the actual attack
         for i in range(0, num_examples, batch_size):
@@ -164,32 +165,9 @@ class PGDOneHotAttack(Attack):
                         pe[~(tm.roll(1, 0).cumsum(0).bool())]
                         for pe, tm in zip(embeddings, target_masks_batch)
                     ]
-                    completion = get_batched_completions(
-                        model,
-                        tokenizer,
-                        embedding_list=embedding_list,
-                        max_new_tokens=self.config.max_new_tokens,
-                    )
-                    for j, c in enumerate(completion):
-                        completions[i + j].append(c)
-                elif self.config.generate_completions == "best":
-                    for j in range(batch_size):
-                        if losses[i + j][-1] == min(losses[i + j]):
-                            embeddings = (
-                                perturbed_one_hots[j:j + 1]
-                                / perturbed_one_hots[j:j + 1].sum(dim=-1, keepdim=True)
-                            ) @ emb
-                            embedding_list = [
-                                pe[~(tm.roll(1, 0).cumsum(0).bool())]
-                                for pe, tm in zip(embeddings, target_masks_batch[j:j+1])
-                            ]
-                            completion = get_batched_completions(
-                                model,
-                                tokenizer,
-                                embedding_list=embedding_list,
-                                max_new_tokens=self.config.max_new_tokens,
-                            )
-                            completions[i + j] = [completion[0]]
+                    for j, e in enumerate(embedding_list):
+                        perturbed_embeddings_list[i + j].append(e.detach())
+
             if self.config.generate_completions == "last":
                 embeddings = perturbed_one_hots / perturbed_one_hots.sum(
                     dim=-1, keepdim=True
@@ -198,13 +176,25 @@ class PGDOneHotAttack(Attack):
                     pe[~(tm.roll(1, 0).cumsum(0).bool())]
                     for pe, tm in zip(embeddings, target_masks_batch)
                 ]
-                completion = get_batched_completions(
-                    model,
-                    tokenizer,
-                    embedding_list=embedding_list,
-                    max_new_tokens=self.config.max_new_tokens,
-                )
-                for j, c in enumerate(completion):
-                    completions[i + j].append(c)
+                perturbed_embeddings_list[i:i+batch_size] = [[el] for el in embedding_list]
 
+        flattened_embeddings = [e for el in perturbed_embeddings_list for e in el]
+        outputs = find_executable_batch_size(self.get_completions, 64)(flattened_embeddings, model, tokenizer, self.config.max_new_tokens)
+
+        for i, output in enumerate(outputs):
+            completions[i // len(perturbed_embeddings_list[0])].append(output)
         return losses, completions
+
+    @staticmethod
+    def get_completions(batch_size, embedding_list, model, tokenizer, max_new_tokens=256):
+        outputs = []
+        for i in trange(0, len(embedding_list), batch_size):
+            output = get_batched_completions(
+                model,
+                tokenizer,
+                embedding_list=embedding_list[i : i + batch_size],
+                max_new_tokens=max_new_tokens,
+                use_cache=True
+            )
+            outputs.extend(output)
+        return outputs

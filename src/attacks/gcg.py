@@ -16,9 +16,9 @@ Extensively tested against a variety of models, including:
 
 Fixes several issues in nanoGCG, mostly re. Llama-2 & tokenization
 """
-
 import gc
 import logging
+import time
 from dataclasses import dataclass
 from typing import Literal
 
@@ -145,10 +145,11 @@ class GCGAttack(Attack):
             if self.config.allow_non_ascii
             else get_nonascii_toks(tokenizer, device=model.device)
         )
-        results = AttackResult([], [], [], [])
+        results = AttackResult([], [], [], [], [])
         for msg, target in dataset:
             msg: dict[str, str]
             target: str
+            t0 = time.time()
 
             pre_ids, prompt_ids, attack_ids, post_ids, target_ids = prepare_tokens(
                 tokenizer,
@@ -187,10 +188,11 @@ class GCGAttack(Attack):
             token_selection = SubstitutionSelectionStrategy("gcg")
 
             losses = []
+            times = []
             optim_strings = []
             self.stop_flag = False
 
-            for _ in trange(self.config.num_steps):
+            for _ in (pbar := trange(self.config.num_steps)):
                 # Compute the token gradient
                 optim_ids_onehot_grad = self.compute_token_gradient(optim_ids, model)
 
@@ -214,7 +216,8 @@ class GCGAttack(Attack):
                                 [
                                     (
                                         pre_prompt_ids.repeat(sampled_ids.shape[0], 1)
-                                        if "Llama-3-8B-Instruct" not in tokenizer.name_or_path
+                                        if "Llama-3-8B-Instruct"
+                                        not in tokenizer.name_or_path
                                         else torch.tensor([]).to(sampled_ids)
                                     ),
                                     sampled_ids,
@@ -270,12 +273,14 @@ class GCGAttack(Attack):
 
                     # Update the buffer based on the loss
                     losses.append(current_loss)
+                    times.append(time.time() - t0)
                     if buffer.size == 0 or current_loss < buffer.get_highest_loss():
                         buffer.add(current_loss, optim_ids)
 
                 optim_ids = buffer.get_best_ids()
                 optim_str = tokenizer.batch_decode(optim_ids)[0]
                 optim_strings.append(optim_str)
+                pbar.set_postfix({"Loss": current_loss, "Best Attack": optim_str[:50]})
 
                 if self.stop_flag:
                     self.logger.info("Early stopping due to finding a perfect match.")
@@ -293,33 +298,40 @@ class GCGAttack(Attack):
                     raise ValueError(
                         f"Unknown value for generate_completions: {self.config.generate_completions}"
                     )
-
-            token_list = [
-                prepare_tokens(
-                    tokenizer,
-                    msg["content"],
-                    "ZZZZZ",
-                    attack=attack,
-                    placement="suffix",
-                )
-                for attack in attacks
-            ]
-            token_list = [
-                torch.cat([a, b, c, d], dim=0).to(model.device)
-                for a, b, c, d, e in token_list
-            ]
-            completions = get_batched_completions(
-                model,
-                tokenizer,
-                token_list=token_list,
-                max_new_tokens=self.config.max_new_tokens,
-                return_tokens=False,
-            )
+            completions = find_executable_batch_size(
+                self.get_completions, batch_size
+            )(msg, attacks, model, tokenizer)
             results.losses.append(losses)
             results.attacks.append(optim_strings)
             results.prompts.append(msg)
             results.completions.append(completions)
+            results.times.append(times)
         return results
+
+    def get_completions(self, batch_size, prompt, attacks, model, tokenizer):
+        outputs = []
+        for i in trange(0, len(attacks), batch_size, desc="Target Model"):
+            token_list = [
+                prepare_tokens(
+                    tokenizer,
+                    prompt=prompt["content"],
+                    target="ZZZZZ",  #  need dummy target (probably)
+                    attack=attack,
+                )
+                for attack in attacks[i : i + batch_size]
+            ]
+            token_list = [
+                torch.cat([a, b, c, d], dim=0) for a, b, c, d, _ in token_list
+            ]
+            output = get_batched_completions(
+                model,
+                tokenizer,
+                token_list=token_list,
+                max_new_tokens=self.config.max_new_tokens,
+                use_cache=True
+            )
+            outputs.extend(output)
+        return outputs
 
     def compute_token_gradient(
         self,

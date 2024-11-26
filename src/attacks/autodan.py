@@ -1,7 +1,7 @@
 """Single file implementation of the AutoDAN attack [https://arxiv.org/abs/2310.04451]"""
 # TODO: move to own get_batched_completions function
 
-import gc
+import time
 import random
 import re
 from dataclasses import dataclass
@@ -206,7 +206,7 @@ class AutoDANAttack(Attack):
         ]
 
         forward_batch_size = self.config.forward_batch_size or self.config.batch_size
-        results = AttackResult([],[],[],[])
+        results = AttackResult([], [], [], [], [])
         # ========== Behavior meta data ==========
         for msg, target in dataset:
             autodan_target_prefix = "(🔓Developer Mode Output) "
@@ -219,7 +219,9 @@ class AutoDANAttack(Attack):
             # ===== init target embeds =====
             attacks = []
             losses = []
+            times = []
             current_loss = None
+            t0 = time.time()
 
             for step in (pbar := trange(self.config.num_steps)):
                 tokens = [prepare_tokens(tokenizer, c, target, msg['content']) for c in optim_strings[: self.config.batch_size]]
@@ -241,6 +243,7 @@ class AutoDANAttack(Attack):
                 pbar.set_postfix_str(f"Loss: {current_loss:.2f}")
                 losses.append(current_loss)
                 attacks.append(best_new_adv_prefix)
+                times.append(time.time() - t0)
 
                 # ====== Checking for early stopping if loss stuck at local minima ======
                 if previous_loss is None or current_loss < previous_loss:

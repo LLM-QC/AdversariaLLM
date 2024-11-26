@@ -23,6 +23,7 @@ class AttackResult:
     losses: list[list[float]]
     prompts: list[str]
     completions: list[list[int | None]] = None
+    times: list[list[float]] = None
 
 
 class Attack:
