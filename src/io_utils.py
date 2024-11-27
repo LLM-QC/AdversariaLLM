@@ -14,7 +14,7 @@ from src.attacks import AttackResult
 def load_model_and_tokenizer(model_path, model_params):
     gc.collect()
     torch.cuda.empty_cache()
-    if "float16" not in model_params.dtype:
+    if "float" not in model_params.dtype:
         if model_params.dtype == "int4":
             quantization_config = BitsAndBytesConfig(
                 load_in_4bit=True,

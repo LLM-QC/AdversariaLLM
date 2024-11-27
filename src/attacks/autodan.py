@@ -1,22 +1,21 @@
 """Single file implementation of the AutoDAN attack [https://arxiv.org/abs/2310.04451]"""
 # TODO: move to own get_batched_completions function
 
-import time
 import random
 import re
+import time
 from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from accelerate.utils import find_executable_batch_size
 from tqdm import trange
-from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from src.io_utils import load_model_and_tokenizer
 from src.lm_utils import get_batched_completions, get_batched_losses, prepare_tokens
 
 from .attack import Attack, AttackResult
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -175,7 +174,7 @@ class AutoDANConfig:
     crossover: float = 0.5
     num_points: int = 5
     mutation: float = 0.01
-    mutate_model_id: str | None = None
+    mutate_model: dict | None = None
 
 
 class AutoDANAttack(Attack):
@@ -185,10 +184,11 @@ class AutoDANAttack(Attack):
     @torch.no_grad
     def run(self, model, tokenizer, dataset) -> AttackResult:
         """Run the AutoDAN attack against a given model and dataset."""
-        if self.config.mutate_model_id is not None:
+        if self.config.mutate_model.id is not None:
             mutate_model = (
                 HuggingFace(
-                    self.config.mutate_model_id,
+                    self.config.mutate_model.id,
+                    self.config.mutate_model,
                 )
                 .to(device)
                 .eval()
@@ -281,18 +281,26 @@ class AutoDANAttack(Attack):
                     raise ValueError(f"Unknown generate_completions: {self.config.generate_completions}")
 
             adv_prompt_tokens = [torch.cat(prepare_tokens(tokenizer, c, target, "")[:4]) for c in candidates]
-            completions = get_batched_completions(
-                model,
-                tokenizer,
-                token_list=adv_prompt_tokens,
-                max_new_tokens=self.config.max_new_tokens,
-                use_cache=True
-            )
+            completions = find_executable_batch_size(self.get_completions, forward_batch_size)(adv_prompt_tokens, model, tokenizer, self.config.max_new_tokens)
             results.losses.append(losses)
             results.attacks.append(attacks)
             results.prompts.append(msg)
             results.completions.append(completions)
         return results
+
+    @staticmethod
+    def get_completions(batch_size, token_list, model, tokenizer, max_new_tokens=256):
+        outputs = []
+        for i in trange(0, len(token_list), batch_size):
+            output = get_batched_completions(
+                model,
+                tokenizer,
+                token_list=token_list[i : i + batch_size],
+                max_new_tokens=max_new_tokens,
+                use_cache=True
+            )
+            outputs.extend(output)
+        return outputs
 
     def sample_control(
         self,
@@ -436,7 +444,7 @@ class AutoDANAttack(Attack):
 class HuggingFace:
     def __init__(self, model_or_model_path, tokenizer=None, config=None):
         if isinstance(model_or_model_path, str):
-            self.model, self.tokenizer = load_model_and_tokenizer(model_or_model_path)
+            self.model, self.tokenizer = load_model_and_tokenizer(model_or_model_path, config)
         else:
             self.model = model_or_model_path
             self.tokenizer = tokenizer
@@ -518,32 +526,3 @@ class HuggingFace:
                 revised_sentence = revised_sentence[:-2]
             outputs.append(revised_sentence)
         return outputs
-
-
-def load_model_and_tokenizer(model_path):
-    model = (
-        AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=torch.float16,
-            trust_remote_code=True,
-        )
-        .to(device)
-        .eval()
-    )
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-
-    if "oasst-sft-6-llama-30b" in model_path:
-        tokenizer.bos_token_id = 1
-        tokenizer.unk_token_id = 0
-    if "guanaco" in model_path:
-        tokenizer.eos_token_id = 2
-        tokenizer.unk_token_id = 0
-    if "llama-2" in model_path:
-        tokenizer.pad_token = tokenizer.unk_token
-        tokenizer.padding_side = "left"
-    if "falcon" in model_path:
-        tokenizer.padding_side = "left"
-    if not tokenizer.pad_token:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    return model, tokenizer
