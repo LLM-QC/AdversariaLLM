@@ -10,6 +10,7 @@ pgd:
   epsilon: 100000.
   alpha: 0.001
   max_new_tokens: 256
+  embedding_scale: null
 pgd_one_hot:
   name: pgd_one_hot
   type: continuous
@@ -135,7 +136,7 @@ pair:
     top_p: 1
   judge_model:
     id: cais/HarmBench-Llama-2-13b-cls
-    max_new_tokens: 256
+    max_new_tokens: 1
 human_jailbreaks:
   name: human_jailbreaks
   type: discrete

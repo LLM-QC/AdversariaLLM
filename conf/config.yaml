@@ -2,7 +2,7 @@ defaults:
   - attacks: attacks
   - datasets: datasets
   - models: models
-  - override hydra/launcher: a100.yaml
+  - override hydra/launcher: a100h100.yaml
   - _self_
 
 hydra:
