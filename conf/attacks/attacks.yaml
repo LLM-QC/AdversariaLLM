@@ -11,6 +11,7 @@ pgd:
   alpha: 0.001
   max_new_tokens: 256
   embedding_scale: null
+  normalize_alpha: false
 pgd_one_hot:
   name: pgd_one_hot
   type: continuous

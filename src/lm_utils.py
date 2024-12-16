@@ -29,7 +29,10 @@ def get_batched_completions(
     masked tokens, but instead have values like -65504 for float16.
     This can lead to small differences in the final logits and thus the generated tokens.
     We are much closer to individual generations than HF model.generate, which often
-    fails in mysterious ways for LLama & Qwen models.
+    fails in mysterious ways for LLama & Qwen models. Generations for CircuitBreakers
+    often look weird, but are actually just what the model would output with `generate`
+    as well.
+
     Number of generations that are the same as single-batch:
         Model Name                         This function    HF generate
         cais/zephyr_7b_r2d2                      100/100        100/100

@@ -28,6 +28,7 @@ class PGDConfig:
     alpha: float = 0.001
     max_new_tokens: int = 256
     embedding_scale: Optional[float] = None
+    normalize_alpha: bool = False
 
 
 class PGDAttack(Attack):
@@ -162,6 +163,7 @@ class PGDAttack(Attack):
                     perturbed_embeddings = (
                         perturbed_embeddings
                         - self.config.alpha
+                        * (self.config.embedding_scale if self.config.normalize_alpha else 1)
                         * perturbed_embeddings.grad.sign()
                         * attack_masks_batch[..., None]
                     )

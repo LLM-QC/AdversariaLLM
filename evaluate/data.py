@@ -17,8 +17,11 @@ def filter_runs(
 
         if isinstance(target, str):
             return value.lower() == target.lower()
+        defaults = {
+            'normalize_alpha': False,
+        }
         if isinstance(target, dict):
-            return all(value[k] == v for k, v in target.items())
+            return all(value.get(k, defaults.get(k, None)) == v for k, v in target.items())
         return any(value.lower() == t.lower() for t in target)
 
     # Apply the matches function to filter runs
