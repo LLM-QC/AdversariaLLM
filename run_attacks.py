@@ -33,6 +33,7 @@ class RunConfig:
 @print_exceptions
 def main(cfg: DictConfig) -> None:
     date_time_string = datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
+    log_file_path = os.path.join(cfg.save_dir, f"{date_time_string}/run.json")
     logging.info("-------------------")
     logging.info(f"Commencing run `{date_time_string}`")
     logging.info("-------------------")
@@ -67,9 +68,7 @@ def main(cfg: DictConfig) -> None:
                     attack_params,
                     cfg,
                 )
-                log_attack(
-                    run_config, results, cfg.log_file + f"{date_time_string}/run.json"
-                )
+                log_attack(run_config, results, log_file_path)
 
 
 if __name__ == "__main__":

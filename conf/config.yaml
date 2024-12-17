@@ -15,7 +15,7 @@ hydra:
     dir: /nfs/staff-ssd/beyer/llm-quick-check/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
 
 name: testing
-log_file: /nfs/staff-ssd/beyer/llm-quick-check/outputs/
+save_dir: /nfs/staff-ssd/beyer/llm-quick-check/outputs/
 
 # overrides for parallelism
 attack_name: null

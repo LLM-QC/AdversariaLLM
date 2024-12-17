@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # determinism
 import logging
@@ -13,7 +12,6 @@ from src.errors import print_exceptions
 from accelerate.utils import find_executable_batch_size
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from src.io_utils import free_vram
 
 
 torch.use_deterministic_algorithms(True, warn_only=True)  # determinism
@@ -122,9 +120,8 @@ def is_judged(run, key):
 @hydra.main(config_path="./conf", config_name="judge", version_base="1.3")
 @print_exceptions
 def main(cfg: DictConfig) -> None:
-    date_time_string = datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
     logging.info("-------------------")
-    logging.info(f"Commencing run `{date_time_string}`")
+    logging.info(f"Commencing judge run")
     logging.info("-------------------")
     classifier = AutoModelForCausalLM.from_pretrained(
         "cais/HarmBench-Llama-2-13b-cls", torch_dtype=torch.bfloat16, device_map="auto"
@@ -137,7 +134,7 @@ def main(cfg: DictConfig) -> None:
     )
 
     paths = []
-    for root, dirs, files in os.walk(cfg.log_file):
+    for root, dirs, files in os.walk(cfg.save_dir):
         if isinstance(cfg.suffixes, ListConfig):
             if not any(root.endswith(s) for s in cfg.suffixes):
                 continue

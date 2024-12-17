@@ -12,7 +12,7 @@ hydra:
     dir: /nfs/staff-ssd/beyer/llm-quick-check/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
 
 name: judge
-log_file: /nfs/staff-ssd/beyer/llm-quick-check/outputs/
+save_dir: /nfs/staff-ssd/beyer/llm-quick-check/outputs/
 suffixes: ["0","1","2","3","4","5","6","7","8","9"]
 n_tokens: null
 n_chars: null

@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # determinism
 import logging
@@ -30,15 +29,11 @@ def batch_completions(batch_size, model, tokenizer, token_list):
 @hydra.main(config_path="./conf", config_name="completions", version_base="1.3")
 @print_exceptions
 def main(cfg: DictConfig) -> None:
-    date_time_string = datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
-    logging.info("-------------------")
-    logging.info(f"Commencing run `{date_time_string}`")
-    logging.info("-------------------")
-    print(cfg)
+    logging.info("Creating completions with cfg:")
+    logging.info(cfg)
 
-    path = "/nfs/staff-ssd/beyer/llm-quick-check/outputs"
     paths = []
-    for root, dirs, files in os.walk(path):
+    for root, dirs, files in os.walk(cfg.save_dir):
         for file in files:
             if file.endswith("run.json"):
                 if any(root.endswith(s) for s in cfg.suffixes):
