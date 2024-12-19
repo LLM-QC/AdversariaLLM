@@ -67,12 +67,14 @@ def load_model_and_tokenizer(model_params):
             tokenizer.model_max_length = 4096
         case path if "meta-llama/meta-llama-3-8b-instruct" in path:
             tokenizer.model_max_length = 8192
-        case path if "berkeley-nest/starling-lm-7b-alpha" in path:
+        case path if "nousresearch/hermes-2-pro-llama-3-8b" in path:
             tokenizer.model_max_length = 8192
-        case path if "gemma-2" in path:
+        case path if "berkeley-nest/starling-lm-7b-alpha" in path:
             tokenizer.model_max_length = 8192
         case path if 'mistralai/mistral-7b-instruct-v0.3' in path:
             tokenizer.model_max_length = 32768
+        case path if "gemma-2" in path:
+            tokenizer.model_max_length = 8192
         case path if 'zephyr' in path:
             tokenizer.model_max_length = 32768
 
@@ -103,11 +105,18 @@ def log_attack(run_config, result: AttackResult, log_file: str):
     }
     log_message.update(asdict(result))
     # merge into log file if it exists already
-    try:
-        with open(log_file, "r") as f:
-            log_data = json.load(f)
-    except FileNotFoundError:
-        log_data = []
+    # try a few times to make sure we dont get contention issues
+    for _ in range(3):
+        try:
+            with open(log_file, "r") as f:
+                log_data = json.load(f)
+            break
+        except FileNotFoundError:
+            log_data = []
+            break
+        except json.decoder.JSONDecodeError:
+            _ = [i for i in range(10000)][0]
+
     log_data.append(log_message)
 
     os.makedirs(os.path.dirname(log_file), exist_ok=True)

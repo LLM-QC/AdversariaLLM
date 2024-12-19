@@ -79,7 +79,6 @@ def judge(batch_size, classifier, tokenizer, behaviors, generations):
     completions = []
     probs = []
     for i in range(0, len(inputs), batch_size):
-        print(i)
         encoded = tokenizer(
             inputs[i : i + batch_size], return_tensors="pt", padding=True
         )

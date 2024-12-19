@@ -439,60 +439,52 @@ def prepare_tokens(
         middle = longest_common_subsequence(sequences_trimmed)
         return torch.tensor(prefix), torch.tensor(middle), torch.tensor(suffix)
 
-    # Generate random messages to find tokenizer patterns, this is ugly but fast
-    num_messages = 100
-    test_chats = make_random_chats(num_messages)
-    templates = tokenizer.apply_chat_template(
-        test_chats, tokenize=False, add_generation_prompt=False
-    )
-    # Sometimes, the chat template adds the BOS token to the beginning of the template.
-    # The tokenizer adds it again later, so we need to remove it to avoid duplication.
-    for i, template in enumerate(templates):
-        if tokenizer.bos_token and template.startswith(tokenizer.bos_token):
-            templates[i] = template.replace(tokenizer.bos_token, "", 1)
-
-    tokenized = [
-        tokenizer(template, return_tensors="pt", add_special_tokens=True).input_ids
-        for template in templates
-    ]
-
-    pre_tokens, post_tokens, suffix_tokens = extract_prefix_middle_suffix(
-        [tok[0] for tok in tokenized]
-    )
-
-    # Now we tokenize the actual attack and prompt
-    def tokenize_chat(chat: list[dict[str, str]], tokenizer) -> torch.Tensor:
-        template = tokenizer.apply_chat_template(
-            chat, tokenize=False, add_generation_prompt=False
+    def tokenize_chats(chats: list[list[dict[str,str]]], tokenizer) -> list[torch.Tensor]:
+        templates = tokenizer.apply_chat_template(
+            chats, tokenize=False, add_generation_prompt=False
         )
-        if tokenizer.bos_token and template.startswith(tokenizer.bos_token):
-            template = template.replace(tokenizer.bos_token, "", 1)
+        # Sometimes, the chat template adds the BOS token to the beginning of the template.
+        # The tokenizer adds it again later, so we need to remove it to avoid duplication.
+        if tokenizer.bos_token:
+            for i, template in enumerate(templates):
+                templates[i] = template.removeprefix(tokenizer.bos_token)
 
-        input_ids = tokenizer(
-            template, return_tensors="pt", add_special_tokens=True
-        ).input_ids[0]
-        return input_ids
+        return [
+            tokenizer(t, return_tensors="pt", add_special_tokens=True).input_ids[0]
+            for t in templates
+        ]
 
-    chat = [
-        {"role": "user", "content": prompt + attack},
-        {"role": "assistant", "content": target},
-    ]
-    tokenized_together = tokenize_chat(chat, tokenizer)
+    # Generate random messages to find tokenizer patterns, this is ugly but fast
+    def get_pre_post_suffix_tokens(tokenizer, num_messages):
+        test_chats = make_random_chats(num_messages)
+        test_tokenized = tokenize_chats(test_chats, tokenizer)
+        return extract_prefix_middle_suffix(test_tokenized)
 
-    # We now cut the tokenized sequence into parts step-by-step.
-    # First, we remove the prefix and suffix tokens, as we already know the prefix and
-    # don't neeed the suffix.
-    prompt_attack_post_target = tokenized_together[len(pre_tokens) : -len(suffix_tokens)]
-    # We now look for the post tokens. These are between [prompt + attack] and [target].
-    prompt_attack_tokens = None
-    for i in range(max(len(prompt_attack_post_target) - len(post_tokens), 0)):
-        if torch.all(
-            prompt_attack_post_target[i : i + len(post_tokens)] == post_tokens
-        ):
-            prompt_attack_tokens, target_tokens = (
-                prompt_attack_post_target[:i],
-                prompt_attack_post_target[i + len(post_tokens) :],
-            )
+    # Some tokenizers and templates (e.g., allenai/Llama-3.1-Tulu-3-8B-DPO) need more
+    # messages because their tokenization is more likely to have weird splits.
+    for num_messages in [100, 1000, 10000]:
+        pre_tokens, post_tokens, suffix_tokens = get_pre_post_suffix_tokens(tokenizer, num_messages)
+        # print(pre_tokens, post_tokens, suffix_tokens)
+        # Now we look at the actual chat by the user
+        chat = [
+            {"role": "user", "content": prompt + attack},
+            {"role": "assistant", "content": target},
+        ]
+        tokenized_together = tokenize_chats([chat], tokenizer)[0]
+        # We now cut the tokenized sequence into parts step-by-step.
+        # First, we remove the prefix and suffix tokens, as we already know the prefix and
+        # don't neeed the suffix.
+        prompt_attack_post_target = tokenized_together[len(pre_tokens) : -len(suffix_tokens)]
+        # We now look for the post tokens. These are between [prompt + attack] and [target].
+        prompt_attack_tokens = None
+        for i in range(max(len(prompt_attack_post_target) - len(post_tokens), 0)):
+            if torch.all(
+                prompt_attack_post_target[i : i + len(post_tokens)] == post_tokens
+            ):
+                prompt_attack_tokens =  prompt_attack_post_target[:i]
+                target_tokens = prompt_attack_post_target[i + len(post_tokens) :]
+                break
+        if prompt_attack_tokens is not None:
             break
     else:
         raise ValueError(
@@ -503,7 +495,7 @@ def prepare_tokens(
         {"role": "user", "content": prompt},
         {"role": "assistant", "content": target},
     ]
-    tokenized_together_no_attack = tokenize_chat(chat_no_attack, tokenizer)
+    tokenized_together_no_attack = tokenize_chats([chat_no_attack], tokenizer)[0]
 
     attack_length = len(tokenized_together) - len(tokenized_together_no_attack)
 

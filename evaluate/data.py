@@ -32,6 +32,9 @@ def filter_runs(
     ].copy()
     return filtered_runs
 
+def run_has_metric(run, metric):
+    return metric in run and run[metric] is not None and not any(m is None for m in run[metric])
+
 
 def make_metrics_cumulative(runs: pd.DataFrame):
     # Methods which generate anyways can use accumulate here
@@ -57,7 +60,7 @@ def make_metrics_cumulative(runs: pd.DataFrame):
 
     for idx, run in runs.iterrows():
         for metric in metric_types:
-            if metric not in run:
+            if not run_has_metric(run, metric):
                 continue
             m = np.array(run[metric]) * metric_types[metric]
             runs.at[idx, metric] = (aggregator_functions[run["algorithm"]](m) * metric_types[metric]).tolist()

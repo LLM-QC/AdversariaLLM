@@ -339,8 +339,8 @@ class AttackLM:
                     continue_final_message=True
                 )
             # Remove BOS token, will get added again later if necessary
-            if tokenizer.bos_token and full_prompt.startswith(tokenizer.bos_token):
-                full_prompt = full_prompt.replace(tokenizer.bos_token, "", 1)
+            if tokenizer.bos_token:
+                full_prompt = full_prompt.removeprefix(tokenizer.bos_token)
             # Ensure tokenizer didn't add superfluous stuff at the end which would
             # interfere with generation
             if not full_prompt.endswith("\""):
@@ -415,8 +415,8 @@ class TargetLM:
                 conv, add_generation_prompt=True, tokenize=False
             )
             # Remove BOS token in batch
-            if tokenizer.bos_token and full_prompt.startswith(tokenizer.bos_token):
-                full_prompt = full_prompt.replace(tokenizer.bos_token, "", 1)
+            if tokenizer.bos_token:
+                full_prompt = full_prompt.removeprefix(tokenizer.bos_token)
 
             full_prompts.append(full_prompt)
 

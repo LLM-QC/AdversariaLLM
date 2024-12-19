@@ -31,6 +31,7 @@ ample_gcg:
   placement: suffix
   generate_completions: all
   seed: 0
+  num_steps: 200
   prompter_lm:
     id: osunlp/AmpleGCG-llama2-sourced-llama2-7b-chat
     tokenizer_id: osunlp/AmpleGCG-llama2-sourced-llama2-7b-chat
@@ -43,11 +44,8 @@ ample_gcg:
     trust_remote_code: True
     compile: True
     generation_config:
-      num_return_sequences: 200 # number of tries per prompt
-      num_beams: 200
-      num_beam_groups: 200
       do_sample: false
-      max_new_tokens: 20 # attack length
+      max_new_tokens: 20
       min_new_tokens: 20
       diversity_penalty: 1.0
   target_lm:

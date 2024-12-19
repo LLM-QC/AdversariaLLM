@@ -256,7 +256,6 @@ class AutoDANAttack(Attack):
                 pbar.set_postfix_str(f"Loss: {current_loss:.2f}")
                 losses.append(current_loss)
                 attacks.append(best_new_adv_prefix)
-                times.append(time.time() - t0)
 
                 # ====== Checking for early stopping if loss stuck at local minima ======
                 if previous_loss is None or current_loss < previous_loss:
@@ -299,6 +298,8 @@ class AutoDANAttack(Attack):
             results.attacks.append(attacks)
             results.prompts.append(msg)
             results.completions.append(completions)
+            times.append([time.time() - t0])
+
             results.times.append(times)
         return results
 
@@ -508,9 +509,9 @@ class HuggingFace:
             messages, tokenize=False, add_generation_prompt=True
         )
         # Remove BOS token in batch
-        for j in range(len(inputs)):
-            if tokenizer.bos_token and inputs[j].startswith(tokenizer.bos_token):
-                inputs[j] = inputs[j].replace(tokenizer.bos_token, "", 1)
+        if tokenizer.bos_token:
+            for j in range(len(inputs)):
+                inputs[j] = inputs[j].removeprefix(tokenizer.bos_token)
 
         generation_function = find_executable_batch_size(
             self.batch_generate_bs, self.generation_batch_size

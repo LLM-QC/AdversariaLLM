@@ -42,6 +42,7 @@ class AmpleGCGConfig:
     placement: str = "suffix"
     generate_completions: Literal["all", "best", "last"] = "all"
     seed: int = 0
+    num_steps: int = 200
     prompter_lm: PrompterLMConfig = field(default_factory=PrompterLMConfig)
     target_lm: TargetLMConfig = field(default_factory=TargetLMConfig)
 
@@ -75,7 +76,7 @@ class AmpleGCGAttack(Attack):
         return results
 
     def get_attack_prompts(self, msg):
-        prompter_model = PrompterModel(self.config.prompter_lm)
+        prompter_model = PrompterModel(self.config.prompter_lm, self.config.num_steps)
         prompter_model.eval()
         attacks = prompter_model.run([msg])
         free_vram()
@@ -141,7 +142,7 @@ class AmpleGCGAttack(Attack):
 
 
 class PrompterModel(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, num_steps):
         super().__init__()
         self.batch_size = config.batch_size
         self.model, self.tokenizer = load_model_and_tokenizer(config)
@@ -151,6 +152,9 @@ class PrompterModel(nn.Module):
             "pad_token_id": self.tokenizer.pad_token_id,
             "eos_token_id": self.tokenizer.eos_token_id,
             "bos_token_id": self.tokenizer.bos_token_id,
+            "num_return_sequences": num_steps,
+            "num_beams": num_steps,
+            "num_beam_groups": num_steps,
         }
         self.gen_config = GenerationConfig(
             **config.generation_config, **self.gen_kwargs
