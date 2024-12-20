@@ -18,7 +18,6 @@ torch.use_deterministic_algorithms(True, warn_only=True)  # determinism
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-
 @torch.no_grad()
 def judge(batch_size, classifier, tokenizer, behaviors, generations):
     chats = [

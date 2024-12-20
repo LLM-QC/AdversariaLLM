@@ -70,7 +70,7 @@ def load_model_and_tokenizer(model_params):
             tokenizer.model_max_length = 8192
         case path if "nousresearch/hermes-2-pro-llama-3-8b" in path:
             tokenizer.model_max_length = 8192
-        case path if "berkeley-nest/starling-lm-7b-alpha" in path:
+        case path if "openchat/openchat_3.5" in path:
             tokenizer.model_max_length = 8192
         case path if 'mistralai/mistral-7b-instruct-v0.3' in path:
             tokenizer.model_max_length = 32768
