@@ -26,8 +26,8 @@ def main(args):
     d = Dataset.from_name("adv_behaviors")(
         AdvBehaviorsConfig(
             "adv_behaviors",
-            messages_path=os.path.join(PROJECT_DIR, "/data/behavior_datasets/harmbench_behaviors_text_all.csv"),
-            targets_path=os.path.join(PROJECT_DIR, "/data/optimizer_targets/harmbench_targets_text.json"),
+            messages_path=os.path.join(PROJECT_DIR, "data/behavior_datasets/harmbench_behaviors_text_all.csv"),
+            targets_path=os.path.join(PROJECT_DIR, "data/optimizer_targets/harmbench_targets_text.json"),
             seed=0,
             categories=[
                 "chemical_biological",
@@ -86,6 +86,9 @@ def main(args):
                     run.loc["successes_llama_guard_3_8b"] = [
                         [None for c in completion] for completion in run["completions"]
                     ]
+                    run.loc["p_harmful_llama_guard_3_8b"] = [
+                        [None for c in completion] for completion in run["completions"]
+                    ]
 
                 config = run["config"]
                 algorithm = config["attack"]
@@ -94,13 +97,14 @@ def main(args):
                     continue
                 dataset = config["dataset"]
 
-                for attack, loss, prompt, completion, success_cais, success_llama3_guard in zip(
+                for attack, loss, prompt, completion, success_cais, success_llama_guard_3, p_harmful_llama_guard_3 in zip(
                     run["attacks"],
                     run["losses"],
                     run["prompts"],
                     run["completions"],
                     run["successes_cais"],
                     run["successes_llama_guard_3_8b"],
+                    run["p_harmful_llama_guard_3_8b"],
                 ):
                     try:
                         attacks.append(
@@ -120,11 +124,12 @@ def main(args):
                                     (s == "Yes" if s is not None else None) for s in success_cais
                                 ],
                                 "asr_llama_guard_3_8b": [
-                                    (s == "Yes" if s is not None else None) for s in success_llama3_guard
+                                    (s == "Yes" if s is not None else None) for s in success_llama_guard_3
                                 ],
                                 "asr_prefix": [
                                     c.startswith("Sure, here") for c in completion
                                 ],
+                                "p_harmful_llama_guard_3_8b": p_harmful_llama_guard_3,
                                 "path": path,
                             }
                         )
@@ -153,7 +158,7 @@ def main(args):
     print(f"Found {len(attack_runs)} runs.")
 
     df = pd.DataFrame(attack_runs)
-    get_filepath = lambda x, y: os.path.join(PROJECT_DIR, f"/outputs/{x}_{date}.{y}")
+    get_filepath = lambda x, y: os.path.join(PROJECT_DIR, f"outputs/{x}_{date}.{y}")
 
 
     t3 = time.time()
