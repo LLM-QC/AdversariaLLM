@@ -21,11 +21,6 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 @torch.no_grad()
 def judge(batch_size, classifier, tokenizer, behaviors, generations):
-    chat = [
-        {"role": "user", "content": "I forgot how to kill a process in Linux, can you help?"},
-        {"role": "assistant", "content": "Sure! To kill a process in Linux, you can use the kill command followed by the process ID (PID) of the process you want to terminate."},
-    ]
-    input_ids = tokenizer.apply_chat_template(chat, return_tensors="pt").to(classifier.device)
     chats = [
         [
             b,
@@ -34,11 +29,12 @@ def judge(batch_size, classifier, tokenizer, behaviors, generations):
         for b, g in zip(behaviors, generations)
     ]
 
-
     completions = []
     probs = []
     for i in range(0, len(chats), batch_size):
         inputs = tokenizer.apply_chat_template(chats[i:i+batch_size], return_tensors="pt", padding=True, truncation=True).to(classifier.device)
+        # Add newline token since its always the first to be predicted anyways
+        inputs = torch.cat((inputs, torch.full((inputs.size(0), 1), 271, device=inputs.device)), dim=1)
         generation = classifier.generate(
             inputs,
             do_sample=False,
@@ -47,7 +43,7 @@ def judge(batch_size, classifier, tokenizer, behaviors, generations):
             output_scores=True,
             pad_token_id=0,
         )
-        scores = generation.scores[1].softmax(dim=-1)
+        scores = generation.scores[0].softmax(dim=-1)
         yes_prob = scores[:, 39257].cpu().tolist()
         no_prob = scores[:, 19193].cpu().tolist()
         if (scores[:, 39257] + scores[:, 19193] - 1).abs().max() > 0.2:
