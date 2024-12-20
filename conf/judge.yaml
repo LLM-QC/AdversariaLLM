@@ -1,11 +1,12 @@
 defaults:
+  - paths
   - override hydra/launcher: a100h100.yaml
   - _self_
 
 hydra:
   mode: MULTIRUN
   run:
-    dir: /nfs/staff-ssd/beyer/llm-quick-check/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
+    dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
   job:
     chdir: true
   sweep:

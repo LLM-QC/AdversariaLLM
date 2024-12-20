@@ -2,20 +2,21 @@ defaults:
   - attacks: attacks
   - datasets: datasets
   - models: models
+  - paths
   - override hydra/launcher: a100h100.yaml
   - _self_
 
 hydra:
   mode: MULTIRUN
   run:
-    dir: /nfs/staff-ssd/beyer/llm-quick-check/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
+    dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
   job:
     chdir: true
   sweep:
-    dir: /nfs/staff-ssd/beyer/llm-quick-check/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
+    dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
 
 name: testing
-save_dir: /nfs/staff-ssd/beyer/llm-quick-check/outputs/
+save_dir: ${root_dir}/outputs/
 
 # overrides for parallelism
 attack_name: null

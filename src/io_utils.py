@@ -2,6 +2,7 @@ import gc
 import json
 import logging
 import os
+import time
 from dataclasses import asdict
 
 import torch
@@ -87,7 +88,8 @@ def load_model_and_tokenizer(model_params):
 
 
 def load_chat_template(template_name):
-    chat_template = open(f"/nfs/staff-ssd/beyer/llm-quick-check/chat_templates/chat_templates/{template_name}.jinja").read()
+    chat_template_dir = os.path.dirname(os.path.dirname(__file__))
+    chat_template = open(os.path.join(chat_template_dir, f"chat_templates/chat_templates/{template_name}.jinja")).read()
     chat_template = chat_template.replace("    ", "").replace("\n", "")
     return chat_template
 
@@ -100,6 +102,7 @@ def free_vram():
 
 def log_attack(run_config, result: AttackResult, log_file: str):
     # Create a structured log message as a JSON object
+    OmegaConf.resolve(run_config.config)
     log_message = {
         "config": OmegaConf.to_container(OmegaConf.structured(run_config), resolve=True)
     }
@@ -115,7 +118,7 @@ def log_attack(run_config, result: AttackResult, log_file: str):
             log_data = []
             break
         except json.decoder.JSONDecodeError:
-            _ = [i for i in range(10000)][0]
+            time.sleep(1)
 
     log_data.append(log_message)
 
