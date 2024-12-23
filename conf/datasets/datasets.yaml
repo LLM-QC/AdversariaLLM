@@ -1,7 +1,7 @@
 adv_behaviors:
   name: adv_behaviors
-  messages_path: /nfs/staff-ssd/beyer/llm-quick-check/data/behavior_datasets/harmbench_behaviors_text_all.csv
-  targets_path: /nfs/staff-ssd/beyer/llm-quick-check/data/optimizer_targets/harmbench_targets_text.json
+  messages_path: ${root_dir}/data/behavior_datasets/harmbench_behaviors_text_all.csv
+  targets_path: ${root_dir}/data/optimizer_targets/harmbench_targets_text.json
   categories: ['chemical_biological', 'illegal', 'misinformation_disinformation', 'harmful', 'harassment_bullying', 'cybercrime_intrusion'] #,'copyright']
   seed: 0
   idx: null

@@ -10,10 +10,11 @@ hydra:
   job:
     chdir: true
   sweep:
-    dir: /nfs/staff-ssd/beyer/llm-quick-check/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
+    dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
 
 name: judge
-save_dir: /nfs/staff-ssd/beyer/llm-quick-check/outputs/
+save_dir: ${root_dir}/outputs/
 suffixes: ["0","1","2","3","4","5","6","7","8","9"]
+classifier: "cais" # or llama_guard_3_8b
 n_tokens: null
 n_chars: null
