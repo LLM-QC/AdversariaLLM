@@ -52,6 +52,8 @@ def make_metrics_cumulative(runs: pd.DataFrame):
 
     metric_types = {
         "asr_cais": 1,
+        "asr_llama_guard_3_8b": 1,
+        "asr_total": 1,
         "sr_cais": -1,
         "loss": -1,
         "asr_prefix": 1,
@@ -69,7 +71,7 @@ def make_metrics_cumulative(runs: pd.DataFrame):
 
 def pad_to_max_length(runs: pd.DataFrame):
     # Repeats the last value of each metric to make all runs the same length
-    metric_types = ["asr_cais", "sr_cais", "loss", "asr_prefix", "sr_prefix"]
+    metric_types = ["asr_cais", "asr_llama_guard_3_8b", "asr_total", "sr_cais", "loss", "asr_prefix", "sr_prefix"]
     for metric in metric_types:
         if metric in runs:
             # Determine the maximum length for the current metric

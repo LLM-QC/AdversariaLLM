@@ -53,31 +53,40 @@ class GCGConfig:
     early_stop: bool = False
     use_prefix_cache: bool = True
     allow_non_ascii: bool = False
+    allow_special: bool = False
     filter_ids: bool = True
-    add_space_before_target: bool = False
     verbosity: str = "WARNING"
     max_new_tokens: int = 256
 
 
-def get_nonascii_toks(tokenizer, device="cpu"):
+def get_disallowed_ids(tokenizer, allow_non_ascii, allow_special, device="cpu"):
+    if allow_special and allow_non_ascii:
+        return None
+    disallowed_ids = []
+
     def is_ascii(s):
         return s.isascii() and s.isprintable()
 
-    nonascii_toks = []
-    for i in range(tokenizer.vocab_size):
-        if not is_ascii(tokenizer.decode([i])):
-            nonascii_toks.append(i)
+    if not allow_non_ascii:
+        for i in range(len(tokenizer)):
+            if not is_ascii(tokenizer.decode([i])):
+                disallowed_ids.append(i)
+
+    if not allow_special:
+        for i in range(len(tokenizer)):
+            if not tokenizer.decode([i], skip_special_tokens=True):
+                disallowed_ids.append(i)
 
     if tokenizer.bos_token_id is not None:
-        nonascii_toks.append(tokenizer.bos_token_id)
+        disallowed_ids.append(tokenizer.bos_token_id)
     if tokenizer.eos_token_id is not None:
-        nonascii_toks.append(tokenizer.eos_token_id)
+        disallowed_ids.append(tokenizer.eos_token_id)
     if tokenizer.pad_token_id is not None:
-        nonascii_toks.append(tokenizer.pad_token_id)
+        disallowed_ids.append(tokenizer.pad_token_id)
     if tokenizer.unk_token_id is not None:
-        nonascii_toks.append(tokenizer.unk_token_id)
-
-    return torch.tensor(nonascii_toks, device=device)
+        disallowed_ids.append(tokenizer.unk_token_id)
+    disallowed_ids = sorted(list(set(disallowed_ids)))
+    return torch.tensor(disallowed_ids, device=device)
 
 
 def mellowmax(t: Tensor, alpha=1.0, dim=-1):
@@ -150,11 +159,7 @@ class GCGAttack(Attack):
             self.logger.setLevel(logging.INFO)
 
     def run(self, model, tokenizer, dataset) -> AttackResult:
-        not_allowed_ids = (
-            None
-            if self.config.allow_non_ascii
-            else get_nonascii_toks(tokenizer, device=model.device)
-        )
+        not_allowed_ids = get_disallowed_ids(tokenizer, self.config.allow_non_ascii, self.config.allow_special, device=model.device)
         results = AttackResult([], [], [], [], [])
         for msg, target in dataset:
             msg: dict[str, str]

@@ -70,8 +70,8 @@ gcg:
   early_stop: False
   use_prefix_cache: True
   allow_non_ascii: False
+  allow_special: False
   filter_ids: True
-  add_space_before_target: False
   verbosity: WARNING
   max_new_tokens: 256
 autodan:
