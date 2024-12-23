@@ -18,8 +18,6 @@ torch.use_deterministic_algorithms(True, warn_only=True)  # determinism
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-
-
 @torch.no_grad()
 def judge_cais(batch_size, classifier, tokenizer, behaviors, generations):
     LLAMA2_CLS_PROMPT = {
@@ -159,7 +157,7 @@ def main(cfg: DictConfig) -> None:
     logging.info(f"Commencing judge run")
     logging.info("-------------------")
     print(cfg)
-    
+
     model_names = {
         "cais": ("cais/HarmBench-Llama-2-13b-cls", judge_cais),
         "llama_guard_3_8b": ("meta-llama/Llama-Guard-3-8B", judge_llama_guard_3),

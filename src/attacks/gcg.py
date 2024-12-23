@@ -28,7 +28,7 @@ from accelerate.utils import find_executable_batch_size
 from torch import Tensor
 from tqdm import trange
 
-from src.lm_utils import get_batched_completions, prepare_tokens
+from src.lm_utils import generate_ragged_batched, prepare_tokens
 
 from .attack import Attack, AttackResult
 
@@ -67,6 +67,8 @@ def get_disallowed_ids(tokenizer, allow_non_ascii, allow_special, device="cpu"):
     def is_ascii(s):
         return s.isascii() and s.isprintable()
 
+    # Important to loop over len(tokenizer), not just tokenizer.vocab_size, because
+    # special tokens added post-hoc are not counted to vocab_size.
     if not allow_non_ascii:
         for i in range(len(tokenizer)):
             if not is_ascii(tokenizer.decode([i])):
@@ -114,12 +116,12 @@ def filter_ids(ids: Tensor, tokenizer: transformers.PreTrainedTokenizer, prompt,
     attacks_decoded = tokenizer.batch_decode(ids)
     filtered_idx = []
 
-    for i in range(len(attacks_decoded)):
+    for i, attack in enumerate(attacks_decoded):
         pre_ids, prompt_ids, attack_ids, post_ids, target_ids = prepare_tokens(
             tokenizer,
             prompt,
             target,
-            attack=attacks_decoded[i],
+            attack=attack,
             placement="suffix",
         )
         # Changed vs the original GCG implementation, we cut off the first few tokens.
@@ -136,9 +138,9 @@ def filter_ids(ids: Tensor, tokenizer: transformers.PreTrainedTokenizer, prompt,
             "Consider setting `filter_ids=False` or trying a different `optim_str_init`"
             "An example of the token sequence that failed:"
             f"{ids[-1]}"
-            "->"
+            "\n->\n"
             f"{attacks_decoded[-1]}"
-            "->"
+            "\n->\n"
             f"{attack_ids}"
         )
     return filtered_idx
@@ -302,40 +304,28 @@ class GCGAttack(Attack):
                     raise ValueError(
                         f"Unknown value for generate_completions: {self.config.generate_completions}"
                     )
-            completions = find_executable_batch_size(
-                self.get_completions, batch_size
-            )(msg, attacks, model, tokenizer)
+            token_list = [
+                torch.cat(prepare_tokens(
+                    tokenizer,
+                    prompt=msg["content"],
+                    target="ZZZZZ",  # need dummy target (probably)
+                    attack=attack,
+                )[:4])
+                for attack in attacks
+            ]
+            completions = generate_ragged_batched(
+                model,
+                tokenizer,
+                token_list=token_list,
+                initial_batch_size=self.config.target_lm.batch_size,
+                max_new_tokens=self.config.target_lm.max_new_tokens
+            )
             results.losses.append(losses)
             results.attacks.append(optim_strings)
             results.prompts.append(msg)
             results.completions.append(completions)
             results.times.append(times)
         return results
-
-    def get_completions(self, batch_size, prompt, attacks, model, tokenizer):
-        outputs = []
-        for i in trange(0, len(attacks), batch_size, desc="Target Model"):
-            token_list = [
-                prepare_tokens(
-                    tokenizer,
-                    prompt=prompt["content"],
-                    target="ZZZZZ",  #  need dummy target (probably)
-                    attack=attack,
-                )
-                for attack in attacks[i : i + batch_size]
-            ]
-            token_list = [
-                torch.cat([a, b, c, d], dim=0) for a, b, c, d, _ in token_list
-            ]
-            output = get_batched_completions(
-                model,
-                tokenizer,
-                token_list=token_list,
-                max_new_tokens=self.config.max_new_tokens,
-                use_cache=True
-            )
-            outputs.extend(output)
-        return outputs
 
     def compute_token_gradient(
         self,

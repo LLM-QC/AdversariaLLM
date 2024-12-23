@@ -1,5 +1,4 @@
 """Single file implementation of the AutoDAN attack [https://arxiv.org/abs/2310.04451]"""
-# TODO: move to own get_batched_completions function
 
 import random
 import re
@@ -13,7 +12,7 @@ from accelerate.utils import find_executable_batch_size
 from tqdm import trange
 
 from src.io_utils import load_model_and_tokenizer
-from src.lm_utils import get_batched_completions, get_batched_losses, prepare_tokens
+from src.lm_utils import get_batched_losses, generate_ragged_batched, prepare_tokens
 
 from .attack import Attack, AttackResult
 
@@ -293,7 +292,7 @@ class AutoDANAttack(Attack):
                     raise ValueError(f"Unknown generate_completions: {self.config.generate_completions}")
 
             adv_prompt_tokens = [torch.cat(prepare_tokens(tokenizer, c, target, "")[:4]) for c in candidates]
-            completions = find_executable_batch_size(self.get_completions, forward_batch_size)(adv_prompt_tokens, model, tokenizer, self.config.max_new_tokens)
+            completions = generate_ragged_batched(model, tokenizer, token_list=adv_prompt_tokens, initial_batch_size=forward_batch_size, max_new_tokens=self.config.max_new_tokens, use_cache=True)
             results.losses.append(losses)
             results.attacks.append(attacks)
             results.prompts.append(msg)
@@ -302,20 +301,6 @@ class AutoDANAttack(Attack):
 
             results.times.append(times)
         return results
-
-    @staticmethod
-    def get_completions(batch_size, token_list, model, tokenizer, max_new_tokens=256):
-        outputs = []
-        for i in trange(0, len(token_list), batch_size):
-            output = get_batched_completions(
-                model,
-                tokenizer,
-                token_list=token_list[i : i + batch_size],
-                max_new_tokens=max_new_tokens,
-                use_cache=True
-            )
-            outputs.extend(output)
-        return outputs
 
     def sample_control(
         self,

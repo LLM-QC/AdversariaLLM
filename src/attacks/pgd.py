@@ -11,8 +11,7 @@ from accelerate.utils import find_executable_batch_size
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import trange
 
-from src.lm_utils import get_batched_completions, prepare_tokens
-from src.io_utils import free_vram
+from src.lm_utils import prepare_tokens, generate_ragged_batched
 
 from .attack import Attack, AttackResult
 
@@ -183,34 +182,20 @@ class PGDAttack(Attack):
                     [self.select_tokens(pe, tm) for pe, tm in zip(perturbed_embeddings, target_masks_batch)]
                 ]
         flattened_embeddings = [e for el in perturbed_embeddings_list for e in el]
-        outputs = find_executable_batch_size(self.get_completions, 64)(
-            flattened_embeddings, model, tokenizer, self.config.max_new_tokens
-        )
 
+        outputs = generate_ragged_batched(
+            model,
+            tokenizer,
+            embedding_list=flattened_embeddings,
+            initial_batch_size=64,
+            max_new_tokens=self.config.max_new_tokens,
+        )
         for i, output in enumerate(outputs):
             completions[i // len(perturbed_embeddings_list[0])].append(output)
         return losses, completions, times
 
-    @staticmethod
-    def get_completions(
-        batch_size, embedding_list, model, tokenizer, max_new_tokens=256
-    ):
-        outputs = []
-        logging.info(f"Generating completions for {len(embedding_list)} examples in batches of {batch_size}")
-        for i in trange(0, len(embedding_list), batch_size):
-            free_vram()
-            output = get_batched_completions(
-                model,
-                tokenizer,
-                embedding_list=embedding_list[i : i + batch_size],
-                max_new_tokens=max_new_tokens,
-                use_cache=True,
-            )
-            outputs.extend(output)
-        return outputs
-
     def project_l2(self, delta):
-        # We project the perturbation to have at most epsilon norm in the L2 norm
+        # We project the perturbation to have at most epsilon L2 norm
         # To compare across model families, we normalize epsilon by the mean embedding norm
         norm = delta.norm(p=2, dim=-1, keepdim=True)
         eps_normalized = self.config.epsilon * self.config.embedding_scale

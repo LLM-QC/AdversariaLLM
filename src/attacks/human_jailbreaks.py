@@ -6,7 +6,7 @@ import transformers
 from tqdm import trange
 
 from src.attacks import Attack, AttackResult
-from src.lm_utils import get_batched_completions, get_batched_losses, prepare_tokens
+from src.lm_utils import generate_ragged, get_batched_losses, prepare_tokens
 
 
 @dataclass
@@ -54,7 +54,7 @@ class HumanJailbreaksAttack(Attack):
                     torch.cat([a, b, c, d])[-tokenizer.model_max_length:] for a, b, c, d, e in token_list_batch
                 ]
 
-                completion = get_batched_completions(
+                completion = generate_ragged(
                     model,
                     tokenizer,
                     token_list=token_list_completion,

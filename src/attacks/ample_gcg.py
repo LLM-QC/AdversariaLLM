@@ -11,7 +11,7 @@ from tqdm import trange
 from transformers import GenerationConfig
 
 from src.io_utils import free_vram, load_model_and_tokenizer
-from src.lm_utils import get_batched_completions, get_batched_losses, prepare_tokens
+from src.lm_utils import get_batched_losses, generate_ragged_batched, prepare_tokens
 
 from .attack import Attack, AttackResult
 
@@ -65,9 +65,22 @@ class AmpleGCGAttack(Attack):
             losses = find_executable_batch_size(
                 self.get_losses, self.config.target_lm.batch_size
             )(msg, attacks, target, model, tokenizer)
-            completions = find_executable_batch_size(
-                self.get_completions, self.config.target_lm.batch_size
-            )(msg, attacks, model, tokenizer)
+            token_list = [
+                torch.cat(prepare_tokens(
+                    tokenizer,
+                    prompt=msg["content"],
+                    target="ZZZZZ",  # need dummy target (probably)
+                    attack=attack,
+                )[:4])
+                for attack in attacks
+            ]
+            completions = generate_ragged_batched(
+                model,
+                tokenizer,
+                token_list=token_list,
+                initial_batch_size=self.config.target_lm.batch_size,
+                max_new_tokens=self.config.target_lm.max_new_tokens
+            )
             results.attacks.append(attacks)
             results.losses.append(losses)
             results.prompts.append(msg)
@@ -90,31 +103,6 @@ class AmpleGCGAttack(Attack):
             add_generation_prompt=True,
         )
 
-    def get_completions(self, batch_size, prompt, attacks, model, tokenizer):
-        outputs = []
-        for i in trange(0, len(attacks), batch_size, desc="Target Model"):
-            token_list = [
-                prepare_tokens(
-                    tokenizer,
-                    prompt=prompt["content"],
-                    target="ZZZZZ",  #  need dummy target (probably)
-                    attack=attack,
-                )
-                for attack in attacks[i : i + batch_size]
-            ]
-            token_list = [
-                torch.cat([a, b, c, d], dim=0) for a, b, c, d, _ in token_list
-            ]
-            output = get_batched_completions(
-                model,
-                tokenizer,
-                token_list=token_list,
-                max_new_tokens=self.config.target_lm.max_new_tokens,
-                use_cache=True
-            )
-            outputs.extend(output)
-        return outputs
-
     def get_losses(self, batch_size, prompt, attacks, target, model, tokenizer):
         outputs = []
         for i in trange(0, len(attacks), batch_size, desc="Target Model"):
@@ -122,7 +110,7 @@ class AmpleGCGAttack(Attack):
                 prepare_tokens(
                     tokenizer,
                     prompt=prompt["content"],
-                    target="ZZZZZ",  # need dummy target (probably)
+                    target=target,  # need dummy target (probably)
                     attack=attack,
                 )
                 for attack in attacks[i : i + batch_size]

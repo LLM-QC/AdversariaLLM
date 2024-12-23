@@ -8,7 +8,7 @@ import torch
 import transformers
 
 from src.attacks import Attack, AttackResult
-from src.lm_utils import get_batched_completions, get_batched_losses, prepare_tokens
+from src.lm_utils import generate_ragged, get_batched_losses, prepare_tokens
 
 
 @dataclass
@@ -56,7 +56,7 @@ class DirectAttack(Attack):
 
         for chunk in chunks(token_lists, self.config.batch_size):
             t0 = time.time()
-            completions = get_batched_completions(
+            completions = generate_ragged(
                 model,
                 tokenizer,
                 token_list=[torch.cat([a, b, c, d], dim=0) for a, b, c, d, e in chunk],

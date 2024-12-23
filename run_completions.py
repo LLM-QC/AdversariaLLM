@@ -9,21 +9,12 @@ import json
 from omegaconf import DictConfig
 
 from src.errors import print_exceptions
-from accelerate.utils import find_executable_batch_size
 from src.io_utils import load_model_and_tokenizer
-from src.lm_utils import prepare_tokens, get_batched_completions
+from src.lm_utils import prepare_tokens, generate_ragged_batched
 
 
 torch.use_deterministic_algorithms(True, warn_only=True)  # determinism
 torch.backends.cuda.matmul.allow_tf32 = True
-
-
-def batch_completions(batch_size, model, tokenizer, token_list):
-    completions = []
-    for i in range(0, len(token_list), batch_size):
-        batch = token_list[i:i + batch_size]
-        completions.extend(get_batched_completions(model, tokenizer, token_list=batch, use_cache=True))
-    return completions
 
 
 @hydra.main(config_path="./conf", config_name="completions", version_base="1.3")
@@ -60,7 +51,7 @@ def main(cfg: DictConfig) -> None:
                     else:
                         token_list = [prepare_tokens(tokenizer=tokenizer, prompt=attack, target="ZZZZZ", attack=prompt["content"]) for attack in attacks]
                     token_list = [torch.cat(t[:4]) for t in token_list]
-                    new_completions = find_executable_batch_size(batch_completions, 128)(model, tokenizer, token_list)
+                    new_completions = generate_ragged_batched(model, tokenizer, token_list=token_list, initial_batch_size=128)
                     print("original ------")
                     print(completions[-1])
                     print("new ------")

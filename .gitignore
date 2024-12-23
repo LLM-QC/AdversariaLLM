@@ -4,3 +4,4 @@ __pycache__
 multirun/
 old_outputs/
 outputs_old/
+.vscode/settings.json

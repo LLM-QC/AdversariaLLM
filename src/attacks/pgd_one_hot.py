@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from accelerate.utils import find_executable_batch_size
 from tqdm import trange
-from src.lm_utils import prepare_tokens, get_batched_completions
+from src.lm_utils import generate_ragged_batched, prepare_tokens
 
 from .attack import Attack, AttackResult
 
@@ -183,22 +183,15 @@ class PGDOneHotAttack(Attack):
                 perturbed_embeddings_list[i:i+batch_size] = [[el] for el in embedding_list]
 
         flattened_embeddings = [e for el in perturbed_embeddings_list for e in el]
-        outputs = find_executable_batch_size(self.get_completions, 64)(flattened_embeddings, model, tokenizer, self.config.max_new_tokens)
+        outputs = generate_ragged_batched(
+            model,
+            tokenizer,
+            embedding_list=flattened_embeddings,
+            initial_batch_size=64,
+            max_new_tokens=self.config.max_new_tokens,
+        )
 
         for i, output in enumerate(outputs):
             completions[i // len(perturbed_embeddings_list[0])].append(output)
         return losses, completions, times
 
-    @staticmethod
-    def get_completions(batch_size, embedding_list, model, tokenizer, max_new_tokens=256):
-        outputs = []
-        for i in trange(0, len(embedding_list), batch_size):
-            output = get_batched_completions(
-                model,
-                tokenizer,
-                embedding_list=embedding_list[i : i + batch_size],
-                max_new_tokens=max_new_tokens,
-                use_cache=True
-            )
-            outputs.extend(output)
-        return outputs
