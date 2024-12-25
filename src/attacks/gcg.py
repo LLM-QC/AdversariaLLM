@@ -124,10 +124,6 @@ def filter_ids(ids: Tensor, tokenizer: transformers.PreTrainedTokenizer, prompt,
             attack=attack,
             placement="suffix",
         )
-        # Changed vs the original GCG implementation, we cut off the first few tokens.
-        # This is because we feed the entire text (prompt + attack + post),
-        # which is more accurate in general, but can lead to weird stuff at the
-        # beginning of the sequence.
         if torch.equal(ids[i], attack_ids.to(ids.device)):
             filtered_idx.append(i)
 
@@ -230,9 +226,6 @@ class GCGAttack(Attack):
                         # the entire prompt, not just the attack sequence in an isolated
                         # way. This is because the prompt and attack can affect each
                         # other's tokenization in some cases.
-                        no_pre_prompt_ids = ['Llama-3', 'berkeley-nest/Starling-LM-7B-alpha']
-                        no_post_ids = ['zephyr']
-
                         idx = filter_ids(
                             sampled_ids,
                             tokenizer,
@@ -304,6 +297,7 @@ class GCGAttack(Attack):
                     raise ValueError(
                         f"Unknown value for generate_completions: {self.config.generate_completions}"
                     )
+
             token_list = [
                 torch.cat(prepare_tokens(
                     tokenizer,

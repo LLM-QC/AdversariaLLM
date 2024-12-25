@@ -1,13 +1,15 @@
 import logging
 import random
+from functools import lru_cache
 from typing import Literal
 
 import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
-from transformers import DynamicCache
-from src.io_utils import free_vram
 from tqdm import tqdm
+from transformers import AutoTokenizer, DynamicCache
+
+from src.io_utils import free_vram
 
 
 def generate_batched_completions(*args, **kwargs):
@@ -387,7 +389,7 @@ def get_batched_losses(
 
 
 def prepare_tokens(
-    tokenizer,
+    tokenizer: AutoTokenizer,
     prompt: str,
     target: str,
     attack: str | None = None,
@@ -434,106 +436,6 @@ def prepare_tokens(
         attack, prompt = prompt, ""
     elif attack is None:
         raise ValueError("If placement is 'suffix', attack must be provided.")
-
-    def make_random_chats(n, k=5):
-        generate_random_string = lambda: "".join(
-            random.choices(
-                " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", k=k
-            )
-        )
-
-        return [
-            [
-                {"role": "user", "content": generate_random_string()},
-                {"role": "assistant", "content": generate_random_string()},
-            ]
-            for _ in range(n)
-        ]
-
-    def extract_prefix_middle_suffix(vectors):
-        def longest_common_prefix(sequences):
-            if not sequences:
-                return []
-            prefix = sequences[0]
-            for seq in sequences[1:]:
-                min_len = min(len(prefix), len(seq))
-                i = 0
-                while i < min_len and prefix[i] == seq[i]:
-                    i += 1
-                prefix = prefix[:i]
-                if not prefix:
-                    return []
-            return prefix
-
-        def longest_common_suffix(sequences):
-            if not sequences:
-                return []
-            suffix = sequences[0]
-            for seq in sequences[1:]:
-                min_len = min(len(suffix), len(seq))
-                i = 1
-                while i <= min_len and suffix[-i] == seq[-i]:
-                    i += 1
-                if i > 1:
-                    suffix = suffix[-(i - 1) :]
-                else:
-                    return []
-            return suffix
-
-        def longest_common_subsequence(sequences):
-            if not sequences:
-                return []
-            reference = sequences[0]
-            n = len(reference)
-            # Start with the longest possible substrings and decrease length
-            for length in range(n, 0, -1):
-                for start in range(n - length + 1):
-                    candidate = reference[start : start + length]
-                    if all(
-                        any(
-                            candidate == seq[i : i + length]
-                            for i in range(len(seq) - length + 1)
-                        )
-                        for seq in sequences[1:]
-                    ):
-                        return candidate
-            return []
-
-        # Convert tensors to lists
-        sequences = [vec.tolist() for vec in vectors]
-        # Find the longest common prefix
-        prefix = longest_common_prefix(sequences)
-        # Find the longest common suffix
-        suffix = longest_common_suffix(sequences)
-        # Trim the prefix and suffix from sequences
-        sequences_trimmed = [
-            seq[len(prefix) : len(seq) - len(suffix) if len(suffix) > 0 else None]
-            for seq in sequences
-        ]
-        # Find the longest common subsequence in the trimmed sequences
-        middle = longest_common_subsequence(sequences_trimmed)
-        return torch.tensor(prefix), torch.tensor(middle), torch.tensor(suffix)
-
-    def tokenize_chats(chats: list[list[dict[str,str]]], tokenizer) -> list[torch.Tensor]:
-        templates = tokenizer.apply_chat_template(
-            chats, tokenize=False, add_generation_prompt=False
-        )
-        # Sometimes, the chat template adds the BOS token to the beginning of the template.
-        # The tokenizer adds it again later, so we need to remove it to avoid duplication.
-        if tokenizer.bos_token:
-            for i, template in enumerate(templates):
-                templates[i] = template.removeprefix(tokenizer.bos_token)
-
-        return [
-            tokenizer(t, return_tensors="pt", add_special_tokens=True).input_ids[0]
-            for t in templates
-        ]
-
-    # Generate random messages to find tokenizer patterns, this is ugly but fast
-    def get_pre_post_suffix_tokens(tokenizer, num_messages):
-        test_chats = make_random_chats(num_messages)
-        test_tokenized = tokenize_chats(test_chats, tokenizer)
-        return extract_prefix_middle_suffix(test_tokenized)
 
     # Some tokenizers and templates (e.g., allenai/Llama-3.1-Tulu-3-8B-DPO) need more
     # messages because their tokenization is more likely to have weird splits.
@@ -582,3 +484,107 @@ def prepare_tokens(
         post_tokens = torch.cat([post_tokens, torch.tensor([29871])])
 
     return pre_tokens, prompt_tokens, attack_tokens, post_tokens, target_tokens
+
+
+
+
+def _make_random_chats(n, k=5):
+    generate_random_string = lambda: "".join(
+        random.choices(
+            " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", k=k
+        )
+    )
+
+    return [
+        [
+            {"role": "user", "content": generate_random_string()},
+            {"role": "assistant", "content": generate_random_string()},
+        ]
+        for _ in range(n)
+    ]
+
+def _extract_prefix_middle_suffix(vectors):
+    def longest_common_prefix(sequences):
+        if not sequences:
+            return []
+        prefix = sequences[0]
+        for seq in sequences[1:]:
+            min_len = min(len(prefix), len(seq))
+            i = 0
+            while i < min_len and prefix[i] == seq[i]:
+                i += 1
+            prefix = prefix[:i]
+            if not prefix:
+                return []
+        return prefix
+
+    def longest_common_suffix(sequences):
+        if not sequences:
+            return []
+        suffix = sequences[0]
+        for seq in sequences[1:]:
+            min_len = min(len(suffix), len(seq))
+            i = 1
+            while i <= min_len and suffix[-i] == seq[-i]:
+                i += 1
+            if i > 1:
+                suffix = suffix[-(i - 1) :]
+            else:
+                return []
+        return suffix
+
+    def longest_common_subsequence(sequences):
+        if not sequences:
+            return []
+        reference = sequences[0]
+        n = len(reference)
+        # Start with the longest possible substrings and decrease length
+        for length in range(n, 0, -1):
+            for start in range(n - length + 1):
+                candidate = reference[start : start + length]
+                if all(
+                    any(
+                        candidate == seq[i : i + length]
+                        for i in range(len(seq) - length + 1)
+                    )
+                    for seq in sequences[1:]
+                ):
+                    return candidate
+        return []
+
+    # Convert tensors to lists
+    sequences = [vec.tolist() for vec in vectors]
+    # Find the longest common prefix
+    prefix = longest_common_prefix(sequences)
+    # Find the longest common suffix
+    suffix = longest_common_suffix(sequences)
+    # Trim the prefix and suffix from sequences
+    sequences_trimmed = [
+        seq[len(prefix) : len(seq) - len(suffix) if len(suffix) > 0 else None]
+        for seq in sequences
+    ]
+    # Find the longest common subsequence in the trimmed sequences
+    middle = longest_common_subsequence(sequences_trimmed)
+    return torch.tensor(prefix), torch.tensor(middle), torch.tensor(suffix)
+
+def tokenize_chats(chats: list[list[dict[str,str]]], tokenizer) -> list[torch.Tensor]:
+    templates = tokenizer.apply_chat_template(
+        chats, tokenize=False, add_generation_prompt=False
+    )
+    # Sometimes, the chat template adds the BOS token to the beginning of the template.
+    # The tokenizer adds it again later, so we need to remove it to avoid duplication.
+    if tokenizer.bos_token:
+        for i, template in enumerate(templates):
+            templates[i] = template.removeprefix(tokenizer.bos_token)
+
+    return [
+        tokenizer(t, return_tensors="pt", add_special_tokens=True).input_ids[0]
+        for t in templates
+    ]
+
+# Generate random messages to find tokenizer patterns, this is ugly but fast
+@lru_cache()
+def get_pre_post_suffix_tokens(tokenizer, num_messages):
+    test_chats = _make_random_chats(num_messages)
+    test_tokenized = tokenize_chats(test_chats, tokenizer)
+    return _extract_prefix_middle_suffix(test_tokenized)
