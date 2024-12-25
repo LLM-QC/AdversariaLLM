@@ -54,6 +54,7 @@ def load_model_and_tokenizer(model_params):
         truncation_side="left",
         padding_side="left"
     )
+    # Model-specific tokenizer fixes
     match model_params.tokenizer_id.lower():
         case path if "oasst-sft-6-llama-30b" in path:
             tokenizer.bos_token_id = 1
