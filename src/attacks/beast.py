@@ -7,12 +7,13 @@ Adapted from https://github.com/dreadnode/research/blob/main/notebooks/Mistral%2
 
 import time
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 import torch
 from tqdm import trange
 
-from src.lm_utils import generate_ragged_batched, prepare_tokens
+from src.lm_utils import generate_ragged_batched, prepare_tokens, with_max_batchsize
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from .attack import Attack, AttackResult
@@ -42,6 +43,7 @@ class BEASTAttack(Attack):
             self.config.temperature > 0.0
         ), "Temperature must be greater than 0 for BEAST"
 
+    @torch.no_grad()
     def run(self, model: AutoModelForCausalLM, tokenizer: AutoTokenizer, dataset) -> AttackResult:
         """
         Runs the BEASTAttack on a given model and dataset.
@@ -162,7 +164,6 @@ class BEASTAttack(Attack):
             times=times,
         )
 
-    @torch.no_grad()
     def get_perplexity(
         self,
         model,
@@ -180,25 +181,28 @@ class BEASTAttack(Attack):
                 post_tokens,
                 target_tokens,
             ]
-        ) for attack_tokens in attack_tokens_list]).to(model.device)
+        ) for attack_tokens in attack_tokens_list])
 
+        def get_log_probs(target_tokens, x):
+            # Get the relevant logits and softmax
+            logits = model(input_ids=x.to(model.device)).logits
+            output_logits = logits[:, -target_tokens.shape[0] :]
+            log_probs = torch.nn.functional.log_softmax(output_logits, dim=-1).cpu()
+
+            # Repeat target_tokens to match batch size
+            target_tokens = target_tokens.unsqueeze(0).repeat(log_probs.size(0), 1).unsqueeze(-1)
+
+            # Calculate perplexity
+            gathered_log_probs = log_probs.gather(2, target_tokens).squeeze(-1)
+            return gathered_log_probs.mean(dim=1)
+
+        get_log_probs = partial(get_log_probs, target_tokens)
         # Push everything but the last token through
-        logits = model(input_ids=tensor[:, :-1]).logits
-        # Get the relevant logits and softmax
-        output_logits = logits[:, -target_tokens.shape[0] :]
-        log_probs = torch.nn.functional.log_softmax(output_logits, dim=-1).cpu()
+        mean_log_probs = with_max_batchsize(get_log_probs, tensor[:, :-1], initial_batch_size=128)
 
-        # Repeat target_tokens to match batch size
-        target_tokens = target_tokens.unsqueeze(0).repeat(tensor.size(0), 1).unsqueeze(-1)
-
-        # Calculate perplexity
-        gathered_log_probs = log_probs.gather(2, target_tokens).squeeze(-1)
-        mean_log_probs = gathered_log_probs.mean(dim=1)
         perplexity = torch.exp(-mean_log_probs).tolist()
-
         return perplexity
 
-    @torch.no_grad()
     def sample(
         self,
         model,

@@ -42,6 +42,7 @@ def make_metrics_cumulative(runs: pd.DataFrame):
     aggregator_functions = {
         "ample_gcg": np.maximum.accumulate,
         "autodan": np.maximum.accumulate,
+        "beast": lambda x: x,
         "direct": np.maximum.accumulate,
         "gcg": lambda x: x,
         "human_jailbreaks": np.maximum.accumulate,

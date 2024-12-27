@@ -49,6 +49,7 @@ def main(args):
         "human_jailbreaks": 112,
         "pgd": 100,
         "pgd_one_hot": 100,
+        "beast": 20,
     }
 
     def process_file(path):

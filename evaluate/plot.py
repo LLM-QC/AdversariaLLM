@@ -24,12 +24,14 @@ MODEL_FAMILIES = {
         "ids": [
             "meta-llama/Meta-Llama-3.1-8B-Instruct",
             "meta-llama/Meta-Llama-3-8B-Instruct",
+            "meta-llama/Llama-3.2-1B-Instruct",
+            "meta-llama/Llama-3.2-3B-Instruct",
             "GraySwanAI/Llama-3-8B-Instruct-RR",
             "NousResearch/Hermes-2-Pro-Llama-3-8B",
             "allenai/Llama-3.1-Tulu-3-8B-DPO",
         ],
         "color": (0, 103, 219),
-        "markers": ['o', 'x'],
+        "markers": ['o', 'x', 'p', 'h', 's', '^', 'd'],
     },
     "llama2": {
         "ids": [

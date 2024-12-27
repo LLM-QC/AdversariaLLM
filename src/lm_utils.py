@@ -33,8 +33,8 @@ def generate_ragged_batched(
     Args:
         model: The language model to use for generation.
         tokenizer: The tokenizer for the model.
-        input_list: List of embeddings or tokens to generate from.
-        input_type: Specify "embeddings" or "tokens" for input_list.
+        token_list: List of embeddings or tokens to generate from.
+        embedding_list: List of embeddings or tokens to generate from.
         initial_batch_size: Starting batch size for generation.
         **kwargs: Additional arguments will be passed to `generate_ragged`.
     Returns:
@@ -45,43 +45,61 @@ def generate_ragged_batched(
     input_type = "tokens" if token_list is not None else "embeddings"
     input_list = token_list if token_list is not None else embedding_list
 
+    def func(chunk):
+        """Wrapper function to handle a single chunk of inputs."""
+        return generate_ragged(
+            model=model,
+            tokenizer=tokenizer,
+            token_list=chunk if input_type == "tokens" else None,
+            embedding_list=chunk if input_type == "embeddings" else None,
+            use_cache=use_cache,
+            **kwargs,
+        )
+    outputs = with_max_batchsize(func, input_list, initial_batch_size)
+    return outputs
+
+
+def with_max_batchsize(function, input, initial_batch_size=128):
+    """
+    Dynamically adjust batch size if an OOM error occurs.
+
+    Args:
+        function:
+            A single-argument function to run.
+            Takes a tensor or list of tensors and returns a tensor or list of tensors.
+        input:
+            The input to pass to the function, first dimension is batch dimension.
+        initial_batch_size:
+            Starting batch size for execution.
+    Returns:
+        The output of the function.
+    """
     outputs = []
     i = 0
-    batch_size = min(initial_batch_size, len(input_list))
-    pbar = tqdm(total=len(input_list), desc=f"Generating completions b={batch_size}")
-    while i < len(input_list):
-        chunk = input_list[i : i + batch_size]
+    batch_size = min(initial_batch_size, len(input))
+    pbar = tqdm(total=len(input), desc=f"Running function b={batch_size}")
+    while i < len(input):
+        chunk = input[i : i + batch_size]
         try:
             free_vram()
-            if input_type == "embeddings":
-                batch_outputs = generate_ragged(
-                    model=model,
-                    tokenizer=tokenizer,
-                    embedding_list=chunk,
-                    use_cache=use_cache,
-                    **kwargs
-                )
-            elif input_type == "tokens":
-                batch_outputs = generate_ragged(
-                    model=model,
-                    tokenizer=tokenizer,
-                    token_list=chunk,
-                    use_cache=use_cache,
-                    **kwargs
-                )
-            outputs.extend(batch_outputs)
+            output = function(chunk)
+            outputs.append(output)
             i += batch_size  # Move to the next batch
             pbar.update(batch_size)
         except torch.cuda.OutOfMemoryError:
             # If we hit OOM, reduce batch size and retry the same chunk
             batch_size = batch_size // 2
-            pbar.set_description(f"Generating completions b={batch_size}")
+            pbar.set_description(f"Running function b={batch_size}")
             if batch_size < 1:
                 raise RuntimeError(
                     "OOM even with batch_size=1; cannot generate further."
                 )
     pbar.close()
-    assert len(outputs) == len(input_list)
+    if all(isinstance(x, torch.Tensor) for x in outputs):
+        outputs = torch.cat(outputs, dim=0)
+    else:
+        outputs = [item for sublist in outputs for item in sublist]
+    assert len(outputs) == len(input)
     return outputs
 
 
