@@ -346,7 +346,6 @@ class GCGAttack(Attack):
             optim_embeds = (
                 optim_ids_onehot / optim_ids_onehot.sum(dim=-1, keepdim=True)
             ) @ embedding_layer.weight
-            # optim_embeds = (optim_ids_onehot / optim_ids_onehot.norm(dim=-1, keepdim=True)) @ embedding_layer.weight
         else:
             optim_embeds = optim_ids_onehot @ embedding_layer.weight
 

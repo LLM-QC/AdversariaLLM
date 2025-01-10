@@ -55,6 +55,7 @@ MODEL_FAMILIES = {
             "/ceph/ssd/staff/beyer/circuit-breakers/out/Llama-3-8b_CB_50/",
             "/ceph/ssd/staff/beyer/circuit-breakers/out/Llama-3-8b_CB_100/",
             "/ceph/ssd/staff/beyer/circuit-breakers/out/Llama-3-8b_CB_200/",
+            "/ceph/ssd/staff/beyer/circuit-breakers/out/Llama-3-8b_CB_300/",
             "/ceph/ssd/staff/beyer/circuit-breakers/out/Llama-3-8b_CB_500/",
             "/ceph/ssd/staff/beyer/circuit-breakers/out/Llama-3-8b_CB_1000/",
         ],

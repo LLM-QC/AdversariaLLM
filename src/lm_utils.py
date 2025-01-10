@@ -16,7 +16,7 @@ def generate_batched_completions(*args, **kwargs):
     raise NotImplementedError("Please migrate to generate_ragged (direct replacement), or generate_ragged_batched (with dynamic batch size adjustment).")
 
 
-@torch.no_grad
+@torch.no_grad()
 def generate_ragged_batched(
     model,
     tokenizer,
@@ -459,7 +459,6 @@ def prepare_tokens(
     # messages because their tokenization is more likely to have weird splits.
     for num_messages in [100, 1000, 10000]:
         pre_tokens, post_tokens, suffix_tokens = get_pre_post_suffix_tokens(tokenizer, num_messages)
-        # print(pre_tokens, post_tokens, suffix_tokens)
         # Now we look at the actual chat by the user
         chat = [
             {"role": "user", "content": prompt + attack},
@@ -504,15 +503,12 @@ def prepare_tokens(
     return pre_tokens, prompt_tokens, attack_tokens, post_tokens, target_tokens
 
 
-
-
 def _make_random_chats(n, k=5):
     generate_random_string = lambda: "".join(
         random.choices(
             " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", k=k
         )
     )
-
     return [
         [
             {"role": "user", "content": generate_random_string()},
@@ -570,20 +566,17 @@ def _extract_prefix_middle_suffix(vectors):
                     return candidate
         return []
 
-    # Convert tensors to lists
     sequences = [vec.tolist() for vec in vectors]
-    # Find the longest common prefix
     prefix = longest_common_prefix(sequences)
-    # Find the longest common suffix
     suffix = longest_common_suffix(sequences)
     # Trim the prefix and suffix from sequences
     sequences_trimmed = [
         seq[len(prefix) : len(seq) - len(suffix) if len(suffix) > 0 else None]
         for seq in sequences
     ]
-    # Find the longest common subsequence in the trimmed sequences
     middle = longest_common_subsequence(sequences_trimmed)
     return torch.tensor(prefix), torch.tensor(middle), torch.tensor(suffix)
+
 
 def tokenize_chats(chats: list[list[dict[str,str]]], tokenizer) -> list[torch.Tensor]:
     templates = tokenizer.apply_chat_template(

@@ -31,15 +31,18 @@ class PGDConfig:
     max_new_tokens: int = 256
     embedding_scale: Optional[float] = None
     normalize_alpha: bool = False
+    normalize_gradient: bool = False
 
 
 class PGDAttack(Attack):
     def __init__(self, config: PGDConfig):
         super().__init__(config)
         self.batch_size = self.config.batch_size
+        self.zero_init_attack = False
         if self.config.placement == "suffix":
             assert self.config.optim_str_init
-        elif self.config.placement == "command":
+            self.zero_init_attack = self.config.optim_str_init.endswith("zero")
+        elif self.config.placement == "prompt":
             assert not self.config.optim_str_init
 
     def run(self, model: torch.nn.Module, tokenizer, dataset) -> AttackResult:
@@ -48,9 +51,14 @@ class PGDAttack(Attack):
         target_masks: list = []
         prompts = []
         if self.config.embedding_scale is None:
-            self.config.embedding_scale = (
-                model.get_input_embeddings().weight.norm(dim=-1).mean().item()
-            )
+            if self.config.projection == "l2":
+                self.config.embedding_scale = (
+                    model.get_input_embeddings().weight.norm(dim=-1).mean().item()
+                )
+            elif self.config.projection == "l1":
+                self.config.embedding_scale = (
+                    model.get_input_embeddings().weight.norm(dim=-1, p=1).mean().item()
+                )
         for msg, target in dataset:
             pre_tokens, prompt_tokens, attack_tokens, post_tokens, target_tokens = (
                 prepare_tokens(
@@ -61,6 +69,7 @@ class PGDAttack(Attack):
                     placement=self.config.placement,
                 )
             )
+
             tokens = torch.cat(
                 [pre_tokens, prompt_tokens, attack_tokens, post_tokens, target_tokens]
             )
@@ -142,6 +151,9 @@ class PGDAttack(Attack):
             target_masks_batch = target_masks[i : i + batch_size].to(model.device)
 
             original_embeddings = model.get_input_embeddings()(x_batch)
+            if self.zero_init_attack:
+                original_embeddings[attack_masks_batch.bool()] = 0
+
             perturbed_embeddings = original_embeddings.detach().clone()
             for _ in (pbar := trange(self.config.num_steps)):
                 perturbed_embeddings.requires_grad = True
@@ -168,9 +180,15 @@ class PGDAttack(Attack):
                         - self.config.alpha
                         * (self.config.embedding_scale if self.config.normalize_alpha else 1)
                         * perturbed_embeddings.grad.sign()
+                        * (1/perturbed_embeddings.grad.sign().norm(dim=-1, keepdim=True) if self.config.normalize_gradient else 1).nan_to_num(1)
                         * attack_masks_batch[..., None]
                     )
-                    delta = self.project_l2(perturbed_embeddings - original_embeddings)
+                    if self.config.projection == "l2":
+                        delta = self.project_l2(perturbed_embeddings - original_embeddings)
+                    elif self.config.projection == "l1":
+                        delta = self.project_l1(perturbed_embeddings - original_embeddings)
+                    else:
+                        raise ValueError(f"Unknown projection {self.config.projection}")
                     perturbed_embeddings = (original_embeddings + delta).detach()
                 times.append(time.time() - t0)
                 pbar.set_postfix({"loss": loss.mean().item()})
@@ -202,6 +220,52 @@ class PGDAttack(Attack):
         eps_normalized = self.config.epsilon * self.config.embedding_scale
         mask = norm > eps_normalized
         return torch.where(mask, delta * eps_normalized / norm, delta)
+
+    def project_l1(self, delta):
+        """
+        Compute Euclidean projection onto the L1 ball for a batch.
+
+        min ||x - u||_2 s.t. ||u||_1 <= eps
+
+        Inspired by the corresponding numpy version by Adrien Gaidon.
+
+        Parameters
+        ----------
+        x: (batch_size, *) torch array
+        batch of arbitrary-size tensors to project, possibly on GPU
+
+        eps: float
+        radius of l-1 ball to project onto
+
+        Returns
+        -------
+        u: (batch_size, *) torch array
+        batch of projected tensors, reshaped to match the original
+
+        Notes
+        -----
+        The complexity of this algorithm is in O(dlogd) as it involves sorting x.
+
+        References
+        ----------
+        [1] Efficient Projections onto the l1-Ball for Learning in High Dimensions
+            John Duchi, Shai Shalev-Shwartz, Yoram Singer, and Tushar Chandra.
+            International Conference on Machine Learning (ICML 2008)
+        """
+        b, t, d = delta.shape
+        eps = self.config.epsilon * self.config.embedding_scale
+        original_shape = delta.shape
+        dtype = delta.dtype
+        delta = delta.view(b * t, -1)
+        mask = (torch.norm(delta, p=1, dim=1) < eps).float().unsqueeze(1)
+        mu, _ = torch.sort(torch.abs(delta), dim=1, descending=True)
+        cumsum = torch.cumsum(mu, dim=1)
+        arange = torch.arange(1, delta.shape[1] + 1, device=delta.device)
+        rho, _ = torch.max((mu * arange > (cumsum - eps)) * arange, dim=1)
+        theta = (cumsum[torch.arange(b * t), rho.cpu() - 1] - eps) / rho
+        proj = (torch.abs(delta) - theta.unsqueeze(1)).clamp(min=0)
+        delta = mask * delta + (1 - mask) * proj * torch.sign(delta)
+        return delta.view(original_shape).to(dtype)
 
     @staticmethod
     def select_tokens(embeddings, mask):

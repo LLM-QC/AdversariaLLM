@@ -7,6 +7,8 @@ args.add_argument("--model", type=str, default=None)
 args.add_argument("--min-idx", type=int, default=0)
 args.add_argument("--max-idx", type=int, default=100)
 args.add_argument("--pgd", action="store_true")
+args.add_argument("--skip_a100", action="store_true")
+args.add_argument("--skip_h100", action="store_true")
 args = args.parse_args()
 
 model_name = args.model
@@ -45,20 +47,22 @@ template_pgd = (
 indices = f"\"range({args.min_idx},{args.max_idx})\""
 
 commands = []
-commands.append(
-    template_a100.format(
-        model_name=model_name,
-        attack_name=",".join(attacks_a100),
-        indices=indices,
+if not args.skip_a100:
+    commands.append(
+        template_a100.format(
+            model_name=model_name,
+            attack_name=",".join(attacks_a100),
+            indices=indices,
+        )
     )
-)
-commands.append(
-    template_h100.format(
-        model_name=model_name,
-        attack_name=",".join(attacks_h100),
-        indices=indices,
+if not args.skip_h100:
+    commands.append(
+        template_h100.format(
+            model_name=model_name,
+            attack_name=",".join(attacks_h100),
+            indices=indices,
+        )
     )
-)
 if args.pgd:
     commands.append(
         template_pgd.format(

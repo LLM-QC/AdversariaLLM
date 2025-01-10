@@ -70,6 +70,10 @@ class Attack:
                 from .pgd_one_hot import PGDOneHotAttack
 
                 return PGDOneHotAttack
+            case "prefilling":
+                from .prefilling import PrefillingAttack
+
+                return PrefillingAttack
             case _:
                 raise ValueError(f"Unknown attack: {name}")
 

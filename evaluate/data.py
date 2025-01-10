@@ -19,6 +19,7 @@ def filter_runs(
             return value.lower() == target.lower()
         defaults = {
             'normalize_alpha': False,
+            'projection': 'l2',
         }
         if isinstance(target, dict):
             return all(value.get(k, defaults.get(k, None)) == v for k, v in target.items())

@@ -37,7 +37,7 @@ class PGDOneHotAttack(Attack):
         self.batch_size = self.config.batch_size
         if self.config.placement == "suffix":
             assert self.config.optim_str_init
-        elif self.config.placement == "command":
+        elif self.config.placement == "prompt":
             assert not self.config.optim_str_init
 
     def run(self, model: torch.nn.Module, tokenizer, dataset) -> AttackResult:

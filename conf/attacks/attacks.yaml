@@ -140,11 +140,13 @@ pgd:
   seed: 0
   batch_size: 16
   optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
-  epsilon: 100000.
+  epsilon: 1.
   alpha: 0.001
   max_new_tokens: 256
   embedding_scale: null
-  normalize_alpha: false
+  normalize_alpha: true
+  normalize_gradient: false
+  projection: l2
 pgd_one_hot:
   name: pgd_one_hot
   type: continuous
@@ -157,4 +159,13 @@ pgd_one_hot:
   epsilon: 100000.
   momentum: 0.5
   alpha: 0.001
+  max_new_tokens: 256
+prefilling:
+  name: prefilling
+  type: discrete
+  placement: null
+  generate_completions: all
+  num_steps: 1
+  seed: 0
+  batch_size: 300
   max_new_tokens: 256
