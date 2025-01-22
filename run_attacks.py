@@ -36,7 +36,15 @@ def main(cfg: DictConfig) -> None:
     log_file_path = os.path.join(cfg.save_dir, f"{date_time_string}/run.json")
     logging.info("-------------------")
     logging.info(f"Commencing run `{date_time_string}`")
+    logging.info(f"Saving to: {log_file_path}")
     logging.info("-------------------")
+
+    if cfg.model_name not in cfg.models.keys():
+        raise ValueError(f"Model `{cfg.model_name}` not found in config; should be one of {cfg.models.keys()}")
+    if cfg.dataset_name not in cfg.datasets.keys():
+        raise ValueError(f"Dataset `{cfg.dataset_name}` not found in config; should be one of {cfg.datasets.keys()}")
+    if cfg.attack_name not in cfg.attacks.keys():
+        raise ValueError(f"Attack `{cfg.attack_name}` not found in config; should be one of {cfg.attacks.keys()}")
 
     for model_name, model_params in cfg.models.items():
         if cfg.model_name is not None and model_name != cfg.model_name:

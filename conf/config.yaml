@@ -3,17 +3,17 @@ defaults:
   - datasets: datasets
   - models: models
   - paths
-  - override hydra/launcher: a100h100.yaml
+  # - override hydra/launcher: a100h100.yaml
   - _self_
 
-hydra:
-  mode: MULTIRUN
-  run:
-    dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
-  job:
-    chdir: true
-  sweep:
-    dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
+# hydra:
+#   mode: MULTIRUN
+#   run:
+#     dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
+#   job:
+#     chdir: true
+#   sweep:
+#     dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
 
 name: testing
 save_dir: ${root_dir}/outputs/

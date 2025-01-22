@@ -35,6 +35,7 @@ class AdvBehaviorsConfig:
     categories: list[str]
     seed: int = 0
     idx: list[int]|int|None = None
+    batch: int|None = None
 
 
 class AdvBehaviorsDataset(Dataset):
@@ -56,16 +57,24 @@ class AdvBehaviorsDataset(Dataset):
         self.targets = self.messages[self.messages.columns[-1]].map(targets)
         assert len(self.messages) == len(self.targets), "Mismatched lengths"
 
+        # handle batching inputs
+        if config.batch is not None:
+            if isinstance(config.idx, Sequence):
+                raise ValueError("Cannot use config.batch with a sequence of indices")
+            selected_idx = list(range(config.idx, min(config.idx + config.batch, len(self.messages))))
+        else:
+            selected_idx = config.idx
+
         # shuffle
         torch.manual_seed(config.seed)
         idx = torch.randperm(len(self.messages))
         # We keep this shuffle for backwards compatibility
-        if isinstance(config.idx, int):
-            idx = idx[config.idx:config.idx + 1]
-        elif isinstance(config.idx, Sequence):
-            idx = idx[config.idx]
-        elif config.idx is not None:
-            raise ValueError(f"Invalid idx: {config.idx}")
+        if isinstance(selected_idx, int):
+            idx = idx[selected_idx:selected_idx + 1]
+        elif isinstance(selected_idx, Sequence):
+            idx = idx[selected_idx]
+        elif selected_idx is not None:
+            raise ValueError(f"Invalid idx: {selected_idx}")
         # cut
         self.messages = self.messages.iloc[idx].reset_index(drop=True)
         self.targets = self.targets.iloc[idx].reset_index(drop=True)

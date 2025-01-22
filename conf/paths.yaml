@@ -1,1 +1,2 @@
-root_dir: /ceph/ssd/staff/beyer/llm-quick-check
+# root_dir: /ceph/ssd/staff/beyer/llm-quick-check
+root_dir: /home/mila/d/david-a.dobre/scratch/2024/llm-quick-check
