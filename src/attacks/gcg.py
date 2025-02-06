@@ -56,6 +56,7 @@ class GCGConfig:
     allow_special: bool = False
     filter_ids: bool = True
     verbosity: str = "WARNING"
+    token_selection: str = "default"
     max_new_tokens: int = 256
 
 
@@ -198,7 +199,7 @@ class GCGAttack(Attack):
             # Initialize the attack buffer
             buffer = self.init_buffer(model, attack_ids)
             optim_ids = buffer.get_best_ids()
-            token_selection = SubstitutionSelectionStrategy("gcg")
+            token_selection = SubstitutionSelectionStrategy(self.config.token_selection, self.config, self.prefix_cache, self.pre_prompt_embeds, self.post_embeds, self.target_embeds, self.target_ids)
 
             losses = []
             times = []
@@ -207,18 +208,17 @@ class GCGAttack(Attack):
 
             for _ in (pbar := trange(self.config.num_steps)):
                 # Compute the token gradient
-                optim_ids_onehot_grad = self.compute_token_gradient(optim_ids, model)
 
+                sampled_ids, sampled_ids_pos = token_selection(
+                    optim_ids.squeeze(0),
+                    model,
+                    self.config.search_width,
+                    self.config.topk,
+                    self.config.n_replace,
+                    not_allowed_ids=not_allowed_ids,
+                )
                 with torch.no_grad():
                     # Sample candidate token sequences
-                    sampled_ids, sampled_ids_pos = token_selection(
-                        optim_ids.squeeze(0),
-                        optim_ids_onehot_grad.squeeze(0),
-                        self.config.search_width,
-                        self.config.topk,
-                        self.config.n_replace,
-                        not_allowed_ids=not_allowed_ids,
-                    )
                     if self.config.filter_ids:
                         # We're trying to be as strict as possible here, so we filter
                         # the entire prompt, not just the attack sequence in an isolated
@@ -318,77 +318,6 @@ class GCGAttack(Attack):
             results.completions.append(completions)
             results.times.append(times)
         return results
-
-    def compute_token_gradient(
-        self,
-        optim_ids: Tensor,
-        model: transformers.PreTrainedModel,
-    ) -> Tensor:
-        """Computes the gradient of the GCG loss w.r.t the one-hot token matrix.
-
-        Args:
-        optim_ids : Tensor, shape = (1, n_optim_ids)
-            the sequence of token ids that are being optimized
-        """
-        embedding_layer = model.get_input_embeddings()
-
-        # Create the one-hot encoding matrix of our optimized token ids
-        optim_ids_onehot = torch.nn.functional.one_hot(
-            optim_ids, num_classes=embedding_layer.num_embeddings
-        )
-        optim_ids_onehot = optim_ids_onehot.to(dtype=model.dtype, device=model.device)
-        optim_ids_onehot.requires_grad_()
-
-        # (1, num_optim_tokens, vocab_size) @ (vocab_size, embed_dim) -> (1, num_optim_tokens, embed_dim)
-        if self.config.use_constrained_gradient:
-            optim_embeds = (
-                optim_ids_onehot / optim_ids_onehot.sum(dim=-1, keepdim=True)
-            ) @ embedding_layer.weight
-        else:
-            optim_embeds = optim_ids_onehot @ embedding_layer.weight
-
-        if self.prefix_cache:
-            input_embeds = torch.cat(
-                [optim_embeds, self.post_embeds, self.target_embeds], dim=1
-            )
-            output = model(
-                inputs_embeds=input_embeds, past_key_values=self.prefix_cache, use_cache=True
-            )
-        else:
-            input_embeds = torch.cat(
-                [
-                    self.pre_prompt_embeds,
-                    optim_embeds,
-                    self.post_embeds,
-                    self.target_embeds,
-                ],
-                dim=1,
-            )
-            output = model(inputs_embeds=input_embeds)
-
-        logits = output.logits
-
-        # Shift logits so token n-1 predicts token n
-        shift = input_embeds.shape[1] - self.target_ids.shape[1]
-        shift_logits = logits[
-            ..., shift - 1 : -1, :
-        ].contiguous()  # (1, num_target_ids, vocab_size)
-        shift_labels = self.target_ids
-
-        if self.config.use_mellowmax:
-            label_logits = torch.gather(
-                shift_logits, -1, shift_labels.unsqueeze(-1)
-            ).squeeze(-1)
-            loss = mellowmax(-label_logits, alpha=self.config.mellowmax_alpha, dim=-1)
-        else:
-            loss = torch.nn.functional.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
-            )
-
-        optim_ids_onehot_grad = torch.autograd.grad(
-            outputs=[loss], inputs=[optim_ids_onehot]
-        )[0]
-        return optim_ids_onehot_grad
 
     def init_buffer(self, model, init_buffer_ids):
         config = self.config
@@ -532,13 +461,19 @@ class AttackBuffer:
 
 
 class SubstitutionSelectionStrategy:
-    def __init__(self, strategy: str):
+    def __init__(self, strategy: str, config: GCGConfig, prefix_cache: list[tuple[Tensor, Tensor]], pre_prompt_embeds: Tensor, post_embeds: Tensor, target_embeds: Tensor, target_ids: Tensor):
+        self.config = config
         self.strategy = strategy
+        self.prefix_cache = prefix_cache
+        self.pre_prompt_embeds = pre_prompt_embeds
+        self.post_embeds = post_embeds
+        self.target_embeds = target_embeds
+        self.target_ids = target_ids
 
     def __call__(
         self,
         ids: Tensor,
-        grad: Tensor,
+        model: transformers.PreTrainedModel,
         search_width: int,
         topk: int,
         n_replace: int,
@@ -546,10 +481,10 @@ class SubstitutionSelectionStrategy:
         *args,
         **kwargs,
     ):
-        if self.strategy == "gcg":
+        if self.strategy == "default":
             return self._sample_ids_from_grad(
                 ids,
-                grad,
+                model,
                 search_width,
                 topk,
                 n_replace,
@@ -560,7 +495,18 @@ class SubstitutionSelectionStrategy:
         elif self.strategy == "random_overall":
             return self._random_overall(
                 ids,
-                grad,
+                model,
+                search_width,
+                topk,
+                n_replace,
+                not_allowed_ids,
+                *args,
+                **kwargs,
+            )
+        elif self.strategy == "random_per_position":
+            return self._random_per_position(
+                ids,
+                model,
                 search_width,
                 topk,
                 n_replace,
@@ -571,14 +517,14 @@ class SubstitutionSelectionStrategy:
         else:
             raise ValueError(f"Invalid replacement selection strategy: {self.strategy}")
 
-    @staticmethod
     def _sample_ids_from_grad(
+        self,
         ids: Tensor,
-        grad: Tensor,
+        model: transformers.PreTrainedModel,
         search_width: int,
         topk: int = 256,
         n_replace: int = 1,
-        not_allowed_ids: Tensor|None=None,
+        not_allowed_ids: Tensor | None = None,
     ):
         """Returns `search_width` combinations of token ids based on the token gradient.
         Original GCG does this.
@@ -601,6 +547,7 @@ class SubstitutionSelectionStrategy:
             sampled_ids : Tensor, shape = (search_width, n_optim_ids)
                 sampled token ids
         """
+        grad = self.compute_token_gradient(ids.unsqueeze(0), model).squeeze(0)  # (n_optim_ids, vocab_size)
         n_optim_tokens = len(ids)
         original_ids = ids.repeat(search_width, 1)
 
@@ -626,14 +573,15 @@ class SubstitutionSelectionStrategy:
 
         return new_ids, sampled_ids_pos
 
-    @staticmethod
+    @torch.no_grad()
     def _random_overall(
+        self,
         ids: Tensor,
-        grad: Tensor,
+        model: transformers.PreTrainedModel,
         search_width: int,
         topk: int = 256,
         n_replace: int = 1,
-        not_allowed_ids: Tensor|None=None,
+        not_allowed_ids: Tensor | None = None,
     ):
         """Returns `search_width` random token substitutions.
 
@@ -648,38 +596,93 @@ class SubstitutionSelectionStrategy:
                 the topk to be used when sampling from the gradient
             n_replace: int
                 the number of token positions to update per sequence
-            not_allowed_ids: Tensor, shape = (n_ids)
+            not_allowed_ids: Tensor, shape = (n_ids,)
                 the token ids that should not be used in optimization
 
         Returns:
             sampled_ids : Tensor, shape = (search_width, n_optim_ids)
                 sampled token ids
         """
+        vocab_size = model.get_input_embeddings().weight.size(0)
+        n_optim_tokens = ids.shape[0]
         original_ids = ids.repeat(search_width, 1)
 
+        # Create valid token mask
+        valid_tokens = torch.ones(vocab_size, dtype=torch.bool, device=ids.device)
         if not_allowed_ids is not None:
-            grad[:, not_allowed_ids.to(grad.device)] = float("inf")
-        # We have 32768 * 20 = 655360 substitutions to evaluate
-        sampled_ids = torch.randperm(grad.view(-1).numel(), device=grad.device)
-        sampled_ids = sampled_ids[~grad.view(-1)[sampled_ids].isinf()]
-        sampled_ids = sampled_ids[:search_width].unsqueeze(1)  # (search_width, 1)
+            valid_tokens[not_allowed_ids.to(ids.device)] = False
 
-        sampled_ids_pos = sampled_ids // grad.size(1)
-        sampled_topk_idx = sampled_ids % grad.size(1)
+        # Sample positions and token indices
+        sampled_ids_pos = torch.randint(0, n_optim_tokens, (search_width, 1), device=ids.device)
+        valid_token_indices = torch.nonzero(valid_tokens).squeeze()
+        sampled_topk_idx = valid_token_indices[torch.randint(0, valid_token_indices.size(0), (search_width, 1), device=ids.device)]
 
-        new_ids = original_ids.scatter_(
-            1, sampled_ids_pos, sampled_topk_idx
-        )  # (search_width, n_optim_ids)
+        # Create new sequences with substitutions
+        new_ids = original_ids.scatter_(1, sampled_ids_pos, sampled_topk_idx)
+
         return new_ids, sampled_ids_pos
 
-    @staticmethod
-    def _lowest_gradient_magnitude(
+    @torch.no_grad()
+    def _random_per_position(
+        self,
         ids: Tensor,
-        grad: Tensor,
+        model: transformers.PreTrainedModel,
         search_width: int,
         topk: int = 256,
         n_replace: int = 1,
-        not_allowed_ids: Tensor|None = None,
+        not_allowed_ids: Tensor | None = None,
+    ):
+        """Returns `search_width` random token substitutions.
+
+        Args:
+            ids : Tensor, shape = (n_optim_ids,)
+                the sequence of token ids that are being optimized
+            model : transformers.PreTrainedModel
+                the model to compute the gradient with respect to
+            search_width : int
+                the number of candidate sequences to return
+            topk : int
+                the topk to be used when sampling from the gradient
+            n_replace: int
+                the number of token positions to update per sequence
+            not_allowed_ids: Tensor, shape = (n_ids,)
+                the token ids that should not be used in optimization
+
+        Returns:
+            sampled_ids : Tensor, shape = (search_width, n_optim_ids)
+                sampled token ids
+        """
+        # Sample search_width//ids.shape[0] substitutions at each position
+        samples_per_position = search_width // ids.shape[0]
+        positions = torch.arange(ids.shape[0], device=ids.device)
+        original_ids = ids.repeat(search_width, 1)
+
+        # Get valid ids for each position (all except not_allowed_ids)
+        valid_ids = torch.ones((ids.shape[0], model.get_input_embeddings().weight.size(0)), dtype=torch.bool, device=ids.device)
+        if not_allowed_ids is not None:
+            valid_ids[:, not_allowed_ids.to(ids.device)] = False
+
+        # Sample indices for each position in parallel
+        sampled_ids = torch.empty((ids.shape[0], samples_per_position), dtype=torch.long, device=ids.device)
+        rand_perm = torch.argsort(torch.rand_like(valid_ids.float()), dim=1)
+        valid_perm = torch.masked_select(rand_perm, valid_ids).reshape(ids.shape[0], -1)
+        sampled_ids = valid_perm[:, :samples_per_position]
+
+        # Reshape to (total_samples, 1) format
+        sampled_topk_idx = sampled_ids.reshape(-1)
+        sampled_ids_pos = positions.repeat_interleave(samples_per_position)
+        original_ids = original_ids[:samples_per_position * ids.shape[0]]
+        new_ids = original_ids.scatter_(1, sampled_ids_pos.unsqueeze(1), sampled_topk_idx.unsqueeze(1))
+        return new_ids, sampled_ids_pos
+
+    def _lowest_gradient_magnitude(
+        self,
+        ids: Tensor,
+        model: transformers.PreTrainedModel,
+        search_width: int,
+        topk: int = 256,
+        n_replace: int = 1,
+        not_allowed_ids: Tensor | None = None,
     ):
         """Returns `search_width` combinations of token ids with the lowest token gradient.
 
@@ -701,6 +704,7 @@ class SubstitutionSelectionStrategy:
             sampled_ids : Tensor, shape = (search_width, n_optim_ids)
                 sampled token ids
         """
+        grad = self.compute_token_gradient(ids.unsqueeze(0), model).squeeze(0)  # (n_optim_ids, vocab_size)
         n_optim_ids = len(ids)
         original_ids = ids.repeat(search_width, 1)
 
@@ -734,3 +738,82 @@ class SubstitutionSelectionStrategy:
         )  # (search_width, n_optim_ids)
 
         return new_ids, sampled_ids_pos
+
+    def compute_token_gradient(
+        self,
+        optim_ids: Tensor,
+        model: transformers.PreTrainedModel,
+    ) -> Tensor:
+        """Computes the gradient of the GCG loss w.r.t the one-hot token matrix.
+
+        Args:
+        optim_ids : Tensor, shape = (N, n_optim_ids)
+            the sequence of token ids that are being optimized
+        model : transformers.PreTrainedModel
+            the model to compute the gradient with respect to
+
+        Returns:
+            grad : Tensor, shape = (N, n_optim_ids, vocab_size)
+                the gradient of the GCG loss computed with respect to the one-hot token embeddings
+        """
+        embedding_layer = model.get_input_embeddings()
+
+        # Create the one-hot encoding matrix of our optimized token ids
+        optim_ids_onehot = torch.nn.functional.one_hot(
+            optim_ids, num_classes=embedding_layer.num_embeddings
+        )
+        optim_ids_onehot = optim_ids_onehot.to(dtype=model.dtype, device=model.device)
+        optim_ids_onehot.requires_grad_()
+
+        # (1, num_optim_tokens, vocab_size) @ (vocab_size, embed_dim) -> (1, num_optim_tokens, embed_dim)
+        if self.config.use_constrained_gradient:
+            optim_embeds = (
+                optim_ids_onehot / optim_ids_onehot.sum(dim=-1, keepdim=True)
+            ) @ embedding_layer.weight
+        else:
+            optim_embeds = optim_ids_onehot @ embedding_layer.weight
+
+        if self.prefix_cache:
+            input_embeds = torch.cat(
+                [optim_embeds, self.post_embeds, self.target_embeds], dim=1
+            )
+            output = model(
+                inputs_embeds=input_embeds, past_key_values=self.prefix_cache, use_cache=True
+            )
+        else:
+            input_embeds = torch.cat(
+                [
+                    self.pre_prompt_embeds,
+                    optim_embeds,
+                    self.post_embeds,
+                    self.target_embeds,
+                ],
+                dim=1,
+            )
+            output = model(inputs_embeds=input_embeds)
+        logits = output.logits
+
+        # Shift logits so token n-1 predicts token n
+        shift = input_embeds.shape[1] - self.target_ids.shape[1]
+        shift_logits = logits[
+            ..., shift - 1 : -1, :
+        ].contiguous()  # (1, num_target_ids, vocab_size)
+        shift_labels = self.target_ids
+
+        if self.config.use_mellowmax:
+            label_logits = torch.gather(
+                shift_logits, -1, shift_labels.unsqueeze(-1)
+            ).squeeze(-1)
+            loss = mellowmax(-label_logits, alpha=self.config.mellowmax_alpha, dim=-1)
+        else:
+            loss = torch.nn.functional.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
+            )
+
+        optim_ids_onehot_grad = torch.autograd.grad(
+            outputs=[loss],
+            inputs=[optim_ids_onehot],
+            create_graph=False,
+            retain_graph=False
+        )[0]
+        return optim_ids_onehot_grad

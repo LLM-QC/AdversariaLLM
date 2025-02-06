@@ -92,6 +92,7 @@ gcg:
   allow_special: False
   filter_ids: True
   verbosity: WARNING
+  token_selection: default
   max_new_tokens: 256
 human_jailbreaks:
   name: human_jailbreaks
