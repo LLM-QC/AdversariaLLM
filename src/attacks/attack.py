@@ -25,6 +25,7 @@ class AttackResult:
     completions: list[list[int | None]] = None
     times: list[list[float]] = None
     completions_toks: list[list[int | None]] = None
+    input_toks: list[list[int | None]] = None
 
 
 class Attack:

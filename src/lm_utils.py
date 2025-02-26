@@ -100,12 +100,13 @@ def with_max_batchsize(function, input, initial_batch_size=128):
 
     if all(isinstance(x, GenerateResults) for x in outputs):
         # TODO: hacky for now to flatten the list of GenerateResults
-        _completions, _tokens = [], []
+        _completions, _tokens, _input_tokens = [], [], []
         for output in outputs:
-            completions, tokens = output.lists()
+            completions, tokens, input_tokens = output.lists()
             _completions.extend(completions)
             _tokens.extend(tokens)
-        outputs = GenerateResults(completions=_completions, tokens=_tokens)
+            _input_tokens.extend(input_tokens)
+        outputs = GenerateResults(completions=_completions, tokens=_tokens, input_tokens=_input_tokens)
 
     elif all(isinstance(x, torch.Tensor) for x in outputs):
         outputs = torch.cat(outputs, dim=0)
@@ -117,18 +118,42 @@ def with_max_batchsize(function, input, initial_batch_size=128):
     return outputs
 
 
+import torch
+from dataclasses import dataclass
+
 @dataclass
 class GenerateResults:
-    completions: list[str]|None = None
+    completions: list[str] | None = None
     tokens: torch.Tensor | list[list[int]] | None = None
+    input_tokens: torch.Tensor | list[list[int]] | None = None
+
+    def __post_init__(self):
+        if self.tokens is None:
+            self.tokens = []
+        if self.input_tokens is None:
+            self.input_tokens = []
 
     def __len__(self):
         return len(self.completions)
 
     def lists(self):
-        if isinstance(self.tokens, torch.Tensor):
-            return self.completions, self.tokens.tolist()
-        return self.completions, self.tokens
+        _completions = self.completions
+        _tokens = self.tokens
+        _input_tokens = self.input_tokens
+
+        # Process tokens
+        if isinstance(_tokens, torch.Tensor):
+            _tokens = _tokens.tolist()
+        elif isinstance(_tokens, list):
+            _tokens = [t.tolist() if isinstance(t, torch.Tensor) else t for t in _tokens]
+
+        # Process input_tokens
+        if isinstance(_input_tokens, torch.Tensor):
+            _input_tokens = _input_tokens.tolist()
+        elif isinstance(_input_tokens, list):
+            _input_tokens = [t.tolist() if isinstance(t, torch.Tensor) else t for t in _input_tokens]
+
+        return _completions, _tokens, _input_tokens
 
 
 @torch.no_grad
@@ -346,7 +371,7 @@ def generate_ragged(
     completion = tokenizer.batch_decode(tokens, skip_special_tokens=False)
     completion = [c.split(tokenizer.eos_token)[0] for c in completion]
     if return_full_output:
-        return GenerateResults(completions=completion, tokens=tokens)
+        return GenerateResults(completions=completion, tokens=tokens, input_tokens=token_list)
     return completion
 
 

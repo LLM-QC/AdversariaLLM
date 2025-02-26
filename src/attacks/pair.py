@@ -84,6 +84,7 @@ class PAIRAttack(Attack):
             results.completions.append(completions)
             results.times.append(times)
             results.losses.append([None] * len(attacks))
+            
         return results
 
     def attack_single_prompt(self, model, tokenizer, prompt, target):

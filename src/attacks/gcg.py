@@ -29,7 +29,7 @@ from torch import Tensor
 from tqdm import trange
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.lm_utils import generate_ragged_batched, prepare_tokens
+from src.lm_utils import generate_ragged_batched, prepare_tokens, GenerateResults
 
 from .attack import Attack, AttackResult
 
@@ -164,7 +164,7 @@ class GCGAttack(Attack):
         log_full_results: bool = False,
     ) -> AttackResult:
         not_allowed_ids = get_disallowed_ids(tokenizer, self.config.allow_non_ascii, self.config.allow_special, device=model.device)
-        results = AttackResult([], [], [], [], [], [])
+        results = AttackResult([], [], [], [], [], [], [])
         for msg, target in dataset:
             msg: dict[str, str]
             target: str
@@ -312,7 +312,7 @@ class GCGAttack(Attack):
                 )[:4])
                 for attack in attacks
             ]
-            completions = generate_ragged_batched(
+            completions: GenerateResults = generate_ragged_batched(
                 model,
                 tokenizer,
                 token_list=token_list,
@@ -326,6 +326,7 @@ class GCGAttack(Attack):
             if log_full_results:
                 results.completions.append(completions.completions)
                 results.completions_toks.append(completions.tokens)
+                results.input_toks.append(completions.input_tokens)
             else:
                 results.completions.append(completions)
             results.times.append(times)
