@@ -61,6 +61,14 @@ class PairConfig:
     judge_model: JudgeModelConfig = field(default_factory=JudgeModelConfig)
 
 
+@dataclass
+class _AttackSinglePromptResult:
+    attacks: list[str]
+    completions: list[str]
+    times: list[float]
+    input_toks: list = field(default_factory=list)
+    completions_toks: list = field(default_factory=list)
+
 class PAIRAttack(Attack):
     def __init__(self, config):
         super().__init__(config)
@@ -72,26 +80,37 @@ class PAIRAttack(Attack):
         dataset: torch.utils.data.Dataset,
         log_full_results: bool = False,
     ) -> AttackResult:
-        results = AttackResult([], [], [], [], [], [])
+        results = AttackResult([], [], [], [], [], [], [])
 
         for msg, target in dataset:
             # prepare tokens
-            attacks, completions, times = self.attack_single_prompt(
+            output = self.attack_single_prompt(
                 model, tokenizer, msg["content"], target
             )
+            attacks, completions, times = output.attacks, output.completions, output.times
             results.prompts.append(msg)
             results.attacks.append(attacks)
             results.completions.append(completions)
             results.times.append(times)
             results.losses.append([None] * len(attacks))
+
+            if log_full_results:
+                results.completions_toks.append(output.completions_toks)
+                results.input_toks.append(output.input_toks)
             
         return results
 
-    def attack_single_prompt(self, model, tokenizer, prompt, target):
+    def attack_single_prompt(self, model, tokenizer, prompt, target) -> _AttackSinglePromptResult:
         attacks = []
         completions = []
         times = []
-        # Initialize models
+
+        # tokens to save
+        input_toks = []
+        completions_toks = []
+
+        # Initialize models 
+        # # TODO move this down to self
         target_model = HuggingFace(model, tokenizer)
         # Can share underlying model and save VRAM if attack & target model are the same
         if self.config.attack_model.id == model.model.name_or_path:
@@ -134,10 +153,15 @@ class PAIRAttack(Attack):
             attacks.extend(adv_prompt_list)
             improv_list = [attack["improvement"] for attack in extracted_attack_list]
 
-            # Get target responses
+            # Get target responses 
+            # TODO: return all the data we want HERE
             times.append(time.time() - t0)
-            target_response_list = target_model.get_response(adv_prompt_list)
+            target_output = target_model.get_response(adv_prompt_list)
+            target_response_list = target_output.outputs_list
+
             completions.extend(target_response_list)
+            input_toks.extend(target_output.input_ids_list)
+            completions_toks.extend(target_output.outputs_ids_list)
             logging.info("Finished getting target responses.")
 
             # Get judge scores
@@ -153,7 +177,14 @@ class PAIRAttack(Attack):
             # if any([score == 10 for score in judge_scores]):
             #     logging.info("Found a jailbreak. Exiting.")
             #     break
-        return attacks, completions, times
+
+        return _AttackSinglePromptResult(
+            attacks=attacks, 
+            completions=completions, 
+            times=times, 
+            input_toks=input_toks, 
+            completions_toks=completions_toks
+        )
 
 
 def fix_llama2_tokens(inputs):
@@ -209,6 +240,14 @@ def fix_llama2_tokens(inputs):
     return inputs
 
 
+@dataclass
+class BatchedGenerateOutput:
+    input_list: list[str]
+    input_ids_list: list[list[int]]
+    outputs_list: list[str]
+    outputs_ids_list: list[list[int]]
+
+
 class HuggingFace:
     def __init__(self, model, tokenizer):
         self.model = model
@@ -227,7 +266,7 @@ class HuggingFace:
         max_new_tokens: int,
         temperature: float,
         top_p: float = 1.0,
-    ):
+    ) -> BatchedGenerateOutput:
         inputs = self.tokenizer(
             full_prompts_list,
             return_tensors="pt",
@@ -260,11 +299,19 @@ class HuggingFace:
 
         for key in inputs:
             inputs[key].to("cpu")
+
+        outputs = BatchedGenerateOutput(
+            input_list=full_prompts_list,
+            input_ids_list=inputs['input_ids'].tolist(),
+            outputs_list=outputs_list,
+            outputs_ids_list=batch_output_ids.tolist()
+        )
+
         del inputs, batch_output_ids
         gc.collect()
         torch.cuda.empty_cache()
 
-        return outputs_list
+        return outputs  # outputs_list
 
     def extend_eos_tokens(self):
         # Add closing braces for Vicuna/Llama eos when using attacker model
@@ -353,13 +400,16 @@ class AttackLM:
         for _ in range(self.max_attempts):
             # Subset conversations based on indices to regenerate
             full_prompts_subset = [full_prompts[i] for i in indices_to_regenerate]
+
             # Generate outputs
-            outputs_list = self.model.batched_generate(
+            outputs = self.model.batched_generate(
                 full_prompts_subset,
                 max_new_tokens=self.max_new_tokens,
                 temperature=self.temperature,
                 top_p=self.top_p,
             )
+            outputs_list = outputs.outputs_list
+
             # Check for valid outputs and update the list
             new_indices_to_regenerate = []
             for i, full_output in enumerate(outputs_list):
@@ -406,7 +456,7 @@ class TargetLM:
         self.max_new_tokens = cfg.max_new_tokens
         self.top_p = cfg.top_p
 
-    def get_response(self, prompts_list):
+    def get_response(self, prompts_list) -> BatchedGenerateOutput:
         tokenizer = self.tokenizer
         batchsize = len(prompts_list)
         convs_list = [[] for _ in range(batchsize)]
@@ -422,13 +472,15 @@ class TargetLM:
 
             full_prompts.append(full_prompt)
 
-        outputs_list = self.model.batched_generate(
+        outputs = self.model.batched_generate(
             full_prompts,
             max_new_tokens=self.max_new_tokens,
             temperature=self.temperature,
             top_p=self.top_p,
         )
-        return outputs_list
+        # outputs_list = outputs.outputs_list
+
+        return outputs
 
 
 def process_target_response(target_response, score, goal):
