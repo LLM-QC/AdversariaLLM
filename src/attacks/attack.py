@@ -54,6 +54,14 @@ class Attack:
                 from .gcg import GCGAttack
 
                 return GCGAttack
+            case "gcg_judge":
+                from .gcg_judge import GCGJudgeAttack
+
+                return GCGJudgeAttack
+            case "gcg_refusal":
+                from .gcg_refusal import GCGRefusalAttack
+
+                return GCGRefusalAttack
             case "human_jailbreaks":
                 from .human_jailbreaks import HumanJailbreaksAttack
 

@@ -120,7 +120,7 @@ pair:
     trust_remote_code: True
     short_name: vicuna
     developer_name: lmsys
-    max_attempts: 5
+    max_attempts: 10
     max_new_tokens: 512
     temperature: 1
     chat_template: vicuna

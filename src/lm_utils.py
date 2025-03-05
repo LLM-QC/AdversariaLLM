@@ -25,6 +25,7 @@ def generate_ragged_batched(
     embedding_list=None,
     initial_batch_size=64,
     use_cache=True,
+    verbose=False,
     **kwargs,
 ) -> list[str]:
     """
@@ -56,13 +57,14 @@ def generate_ragged_batched(
             use_cache=use_cache,
             **kwargs,
         )
-    outputs = with_max_batchsize(func, input_list, initial_batch_size)
+    outputs = with_max_batchsize(func, input_list, initial_batch_size, verbose=verbose)
     return outputs
 
 
-def with_max_batchsize(function, input, initial_batch_size=128):
+def with_max_batchsize(function, input, initial_batch_size=128, verbose=False):
     """
     Dynamically adjust batch size if an OOM error occurs.
+    TODO: Try increasing batch size again if we have enough VRAM.
 
     Args:
         function:
@@ -72,13 +74,15 @@ def with_max_batchsize(function, input, initial_batch_size=128):
             The input to pass to the function, first dimension is batch dimension.
         initial_batch_size:
             Starting batch size for execution.
+        verbose:
+            Whether to print progress.
     Returns:
         The output of the function.
     """
     outputs = []
     i = 0
     batch_size = min(initial_batch_size, len(input))
-    pbar = tqdm(total=len(input), desc=f"Running function b={batch_size}")
+    pbar = tqdm(total=len(input), desc=f"Running function b={batch_size}") if verbose else None
     while i < len(input):
         chunk = input[i : i + batch_size]
         try:
@@ -86,16 +90,19 @@ def with_max_batchsize(function, input, initial_batch_size=128):
             output = function(chunk)
             outputs.append(output)
             i += batch_size  # Move to the next batch
-            pbar.update(batch_size)
+            if verbose:
+                pbar.update(batch_size)
         except torch.cuda.OutOfMemoryError:
             # If we hit OOM, reduce batch size and retry the same chunk
             batch_size = batch_size // 2
-            pbar.set_description(f"Running function b={batch_size}")
+            if verbose:
+                pbar.set_description(f"Running function b={batch_size}")
             if batch_size < 1:
                 raise RuntimeError(
                     "OOM even with batch_size=1; cannot generate further."
                 )
-    pbar.close()
+    if verbose:
+        pbar.close()
     if all(isinstance(x, torch.Tensor) for x in outputs):
         outputs = torch.cat(outputs, dim=0)
     else:
@@ -182,7 +189,7 @@ def generate_ragged(
                 logits = top_p_filtering(logits, top_p)
             if top_k > 0:
                 logits = top_k_filtering(logits, top_k)
-            next_tokens = torch.multinomial(logits, num_samples=1)
+            next_tokens = torch.multinomial(logits.softmax(dim=-1), num_samples=1)
         else:
             next_tokens = logits.argmax(dim=-1)
         return next_tokens
@@ -491,7 +498,7 @@ def prepare_tokens(
         prompt_attack_post_target = tokenized_together[len(pre_tokens) : -len(suffix_tokens)]
         # We now look for the post tokens. These are between [prompt + attack] and [target].
         prompt_attack_tokens = None
-        for i in range(max(len(prompt_attack_post_target) - len(post_tokens), 0)):
+        for i in range(max(len(prompt_attack_post_target) - len(post_tokens) + 1, 0)):
             if torch.all(
                 prompt_attack_post_target[i : i + len(post_tokens)] == post_tokens
             ):
@@ -659,11 +666,11 @@ def top_p_filtering(logits: torch.Tensor, top_p: float) -> torch.Tensor:
 
     # Scatter sorted tensors to original indexing
     indices_to_remove = sorted_indices_to_remove.scatter(
-        1, sorted_indices, sorted_indices_to_remove
+        -1, sorted_indices, sorted_indices_to_remove
     )
-    if single_token_only:
-        indices_to_remove = indices_to_remove.squeeze(1)
     logits[indices_to_remove] = float('-inf')
+    if single_token_only:
+        logits = logits.squeeze(1)
     return logits
 
 
