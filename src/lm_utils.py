@@ -651,7 +651,7 @@ def get_tokenized_no_attack(prompt, target, tokenizer):
     return tokenize_chats([chat_no_attack], tokenizer)[0]
 
 
-s# Generate random messages to find tokenizer patterns, this is ugly but fast
+# Generate random messages to find tokenizer patterns, this is ugly but fast
 @lru_cache()
 def get_pre_post_suffix_tokens(tokenizer, num_messages):
     test_chats = _make_random_chats(num_messages)
