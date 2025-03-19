@@ -18,10 +18,10 @@ hydra:
   sweep:
     dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
 
-name: RF_llama3-2
+name: RF_mistralv3
 root_dir: ${oc.env:PWD}
 save_dir: ${root_dir}/outputs/
-log_file_path: ${save_dir}/redflag_llama3-2/${attack_name}/run-${datasets.adv_behaviors.idx}__${now:%H-%M-%S}.json 
+log_file_path: ${save_dir}/redflag_mistralv3/${attack_name}/run-${datasets.adv_behaviors.idx}__${now:%H-%M-%S}.json 
 
 log_toks_strs: True
 hf_offline_mode: True
@@ -29,7 +29,7 @@ hf_offline_mode: True
 # overrides for parallelism
 attack_name: gcg
 dataset_name: adv_behaviors
-model_name: redflag-tokens/llama3-2-rf
+model_name: redflag-tokens/mistralv3-rf
 
 wandb: null
 # wandb: 

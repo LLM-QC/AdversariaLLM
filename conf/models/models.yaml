@@ -22,6 +22,15 @@ redflag-tokens/phi3-5-rf:
   dtype: bfloat16
   chat_template: phi-3  # same as phi-3 
   trust_remote_code: False  # can't use torch's spda otherwise for some reason!
+redflag-tokens/mistralv3-rf:
+  id: redflag-tokens/mistralv3-rf-5977218-chkpt-275
+  tokenizer_id: mistralai/Mistral-7B-Instruct-v0.3
+  short_name: Mistral
+  developer_name: Mistral AI
+  compile: False
+  dtype: bfloat16
+  chat_template: mistral-instruct
+  trust_remote_code: True
 
 ##### Base models #####
 google/gemma-2-2b-it:

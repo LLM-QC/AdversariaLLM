@@ -3,7 +3,7 @@ defaults:
   - datasets: datasets
   - models: models
   # - paths
-  - override hydra/launcher: mila_generic
+  # - override hydra/launcher: mila_generic
   - _self_
 
 hydra:
@@ -30,3 +30,9 @@ hf_offline_mode: True
 attack_name: gcg
 dataset_name: adv_behaviors
 model_name: redflag-tokens/phi3-5-rf
+
+wandb: null
+# wandb: 
+#   name: null
+#   project: redflag_evals
+#   entity: busycalibrating

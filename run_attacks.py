@@ -64,6 +64,18 @@ def main(cfg: DictConfig) -> None:
     logging.info(f"Saving to: {log_file_path}")
     logging.info("-------------------")
 
+    if wandb_cfg := cfg.get("wandb", None):
+        logging.info("Logging system metrics to Weights & Biases")
+        import wandb
+        wandb.init(
+            project=wandb_cfg.project, 
+            entity=wandb_cfg.entity, 
+            config=dict(cfg),
+            settings=wandb.Settings(
+                system_sample_interval=1,
+            )
+        )
+
     models_to_run = should_run(cfg.models, cfg.model_name)
     datasets_to_run = should_run(cfg.datasets, cfg.dataset_name)
     attacks_to_run = should_run(cfg.attacks, cfg.attack_name)
