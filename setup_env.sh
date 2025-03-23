@@ -43,6 +43,7 @@ pip install -r requirements-drac.txt --no-index
 pip install "$PYWHEELS/locate-1.1.1-py3-none-any.whl" --no-index
 pip install "$PYWHEELS/litellm-1.61.16-py3-none-any.whl" --no-index
 pip install "$PYWHEELS/wordfreq-3.1.1-py3-none-any.whl" --no-index
+pip install "$PYWHEELS/peft-0.14.0-py3-none-any.whl" --no-index
 pip install -e "$HOME/jailbreakbench" --no-index
 pip install -e .
 

@@ -3,7 +3,7 @@ defaults:
 
 _target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
 account: rrg-bengioy-ad
-timeout_min: 
+timeout_min: 179 # 3h
 tasks_per_node: 1
 nodes: 1
 name: ${hydra.job.name}
@@ -11,7 +11,7 @@ signal_delay_s: 600
 max_num_timeout: 20
 additional_parameters: {}
 setup: []
-mem_gb: 32
+mem_gb: 8
 gres: gpu:1
-cpus_per_task: 8
+cpus_per_task: 1
 array_parallelism: 24
