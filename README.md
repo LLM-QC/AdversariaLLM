@@ -31,10 +31,34 @@ python run_attacks.py ++model_name=google/gemma-2-2b-it ++dataset_name=adv_behav
 For DRAC, run attacks:
 
 ```bash
-python run_attacks.py  --config-name=config_rf_llama32 --multirun root_dir=$PWD save_dir=$SCRATCH/llm-quick-check-outputs/ hydra/launcher=drac_gpu hydra.launcher.cpus_per_task=1  hf_offline_mode=true
-python run_attacks.py  --config-name=config_rf_phi35 --multirun root_dir=$PWD save_dir=$SCRATCH/llm-quick-check-outputs/ hydra/launcher=drac_gpu hydra.launcher.cpus_per_task=1  hf_offline_mode=true
-python run_attacks.py  --config-name=config_rf_mistral --multirun root_dir=$PWD save_dir=$SCRATCH/llm-quick-check-outputs/ hydra/launcher=drac_gpu hydra.launcher.cpus_per_task=1  hf_offline_mode=true
+python run_attacks.py --config-name=config_rf_llama32 --multirun root_dir=$PWD save_dir=$SCRATCH/llm-quick-check-outputs/ hydra/launcher=drac_gpu hydra.launcher.cpus_per_task=1  hf_offline_mode=true attack_name=gcg ++attacks.gcg.num_steps=300 datasets.rf_test.idx="range(0,160,step=10)" ++datasets.rf_test.batch=10
+python run_attacks.py --config-name=config_rf_phi35 --multirun root_dir=$PWD save_dir=$SCRATCH/llm-quick-check-outputs/ hydra/launcher=drac_gpu hydra.launcher.cpus_per_task=1  hf_offline_mode=true attack_name=gcg ++attacks.gcg.num_steps=300 datasets.rf_test.idx="range(0,160,step=10)" ++datasets.rf_test.batch=10
+python run_attacks.py --config-name=config_rf_mistral --multirun root_dir=$PWD save_dir=$SCRATCH/llm-quick-check-outputs/ hydra/launcher=drac_gpu hydra.launcher.cpus_per_task=1  hf_offline_mode=true attack_name=gcg ++attacks.gcg.num_steps=300 datasets.rf_test.idx="range(0,160,step=10)" ++datasets.rf_test.batch=10
 ```
+
+and for PAIR:
+
+```bash
+python run_attacks.py --config-name=config_rf_llama32 --multirun root_dir=$PWD save_dir=$SCRATCH/llm-quick-check-outputs/ hydra/launcher=drac_gpu hydra.launcher.cpus_per_task=2  hf_offline_mode=true ++datasets.rf_test.path=${HOME}/harmful-harmless-eval/ ++datasets.rf_test.batch=20 attack_name=pair
+python run_attacks.py --config-name=config_rf_phi35 --multirun root_dir=$PWD save_dir=$SCRATCH/llm-quick-check-outputs/ hydra/launcher=drac_gpu hydra.launcher.cpus_per_task=2  hf_offline_mode=true ++datasets.rf_test.path=${HOME}/harmful-harmless-eval/ ++datasets.rf_test.batch=20 attack_name=pair
+python run_attacks.py --config-name=config_rf_mistral --multirun root_dir=$PWD save_dir=$SCRATCH/llm-quick-check-outputs/ hydra/launcher=drac_gpu hydra.launcher.cpus_per_task=2  hf_offline_mode=true ++datasets.rf_test.path=${HOME}/harmful-harmless-eval/ ++datasets.rf_test.batch=20 attack_name=pair
+```
+
+for some unknown reason trying to do it directly in the config like this:
+
+```yaml
+attacks:
+  gcg:
+    num_steps: 300
+datasets:
+  rf_test:
+    batch: 20
+    path: ${oc.env:HOME}/harmful-harmless-eval/
+```
+
+breaks the output and dumps the pkls in base `multirun/.../.submitit/` directory, rather than in the indivudal run. 
+We need to do `++datasets.rf_test.batch=...`
+
 
 
 ### Installation

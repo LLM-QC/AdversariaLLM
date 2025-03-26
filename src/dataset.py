@@ -149,7 +149,8 @@ class RFTestDataset(Dataset):
 
     def __getitem__(self, idx: int) -> tuple[dict[str, str], str]:
         msg = self.messages[idx]
-        messages = [[{"role": "user", "content": m}] for m in msg]
+        # messages = [[{"role": "user", "content": m}] for m in msg]  # TODO: is this safe?
+        messages = {"role": "user", "content": msg}
         target = self.targets[idx] 
         return messages, target
 

@@ -14,10 +14,16 @@ from src.attacks import Attack
 from src.dataset import Dataset
 from src.errors import print_exceptions
 from src.io_utils import load_model_and_tokenizer, log_attack
+from src.slurm_utils import setup_hf_cache_on_slurm_tmpdir
 
 torch.use_deterministic_algorithms(True, warn_only=True)
 torch.backends.cuda.matmul.allow_tf32 = True
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(levelname)s] %(message)s"
+)
 
 @dataclass
 class RunConfig:
@@ -76,6 +82,17 @@ def main(cfg: DictConfig) -> None:
             )
         )
 
+    if slurm_copy_hf_cache := cfg.get("slurm_copy_hf_cache", None):
+        logging.info(f"Copying models: {OmegaConf.to_yaml(slurm_copy_hf_cache)}")
+        setup_hf_cache_on_slurm_tmpdir(
+            source_hf_home=os.environ.get("HF_HOME"),
+            model_names=slurm_copy_hf_cache.get('models'),
+            dataset_names=slurm_copy_hf_cache.get('datasets'),
+            set_env_vars=True,
+            num_workers=int(os.environ.get("SLURM_CPUS_ON_NODE", 1))
+        )
+        logging.info(f"HF_HOME: {os.environ.get('HF_HOME')}")
+
     models_to_run = should_run(cfg.models, cfg.model_name)
     datasets_to_run = should_run(cfg.datasets, cfg.dataset_name)
     attacks_to_run = should_run(cfg.attacks, cfg.attack_name)
@@ -107,7 +124,6 @@ def main(cfg: DictConfig) -> None:
                     attack_params,
                     cfg,
                 )
-
                 log_attack(run_config, results, log_file_path)
 
 

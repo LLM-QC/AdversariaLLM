@@ -3,14 +3,15 @@ defaults:
 
 _target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
 account: rrg-bengioy-ad
-timeout_min: 179 # 3h
+timeout_min: 300 # 3h: 180m; 5h: 300m
 tasks_per_node: 1
 nodes: 1
 name: ${hydra.job.name}
 signal_delay_s: 600
 max_num_timeout: 20
 additional_parameters: {}
-setup: []
+setup: 
+  - "export HF_HUB_OFFLINE=1"
 mem_gb: 8
 gres: gpu:1
 cpus_per_task: 1

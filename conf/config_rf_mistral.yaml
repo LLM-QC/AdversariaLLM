@@ -10,7 +10,7 @@ hydra:
   # mode: MULTIRUN
   sweeper:
     params:
-      datasets.rf_test.idx: "range(0,160,step=6)"
+      datasets.rf_test.idx: "range(0,160,step=20)"
   run:
     dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
   job:
@@ -25,11 +25,25 @@ log_file_path: ${save_dir}/redflag_mistralv3/${attack_name}/run-${datasets.rf_te
 
 log_toks_strs: True
 hf_offline_mode: True
-attacks.gcg.num_steps: 300
-datasets.rf_test.batch: 6
+attacks:
+  gcg:
+    num_steps: 300
+datasets:
+  rf_test:
+    batch: 20
+    path: ${oc.env:HOME}/harmful-harmless-eval/
+
+slurm_copy_hf_cache:
+  models:
+    - mistralai/Mistral-7B-Instruct-v0.3
+    - redflag-tokens/mistralv3-rf-5977218-chkpt-275
+    - lmsys/vicuna-13b-v1.5
+    - cais/HarmBench-Llama-2-13b-cls
+  # datasets:
+  #   - redflag-tokens/harmful-harmless-eval
 
 # overrides for parallelism
-attack_name: gcg
+attack_name: pair  # gcg
 dataset_name: rf_test
 model_name: redflag-tokens/mistralv3-rf
 
