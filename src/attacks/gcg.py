@@ -262,7 +262,7 @@ class GCGAttack(Attack):
 
                 loss_values = (loss - current_loss)  # Shape: (B,)
                 ids = sampled_ids.gather(1, sampled_ids_pos).squeeze(1)  # (B, L), (B, 1) -> (B,)
-                loss_img[sampled_ids_pos.squeeze(1), ids] = loss_values
+                loss_img[sampled_ids_pos.squeeze(1), ids] = loss_values.to(loss_img.dtype)
 
                 im2 = ax2.imshow(
                     loss_img.cpu().float().numpy(),
