@@ -12,7 +12,7 @@ ample_gcg:
   name: ample_gcg
   type: discrete
   placement: suffix
-  max_new_tokens: ${attacks._default.generation_config.max_new_tokens}
+  generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
   num_steps: 200
   prompter_lm:
@@ -31,9 +31,6 @@ ample_gcg:
       max_new_tokens: 20
       min_new_tokens: 20
       diversity_penalty: 1.0
-  target_lm:
-    batch_size: 64
-    max_new_tokens: 256
 autodan:
   name: autodan
   type: discrete
@@ -158,6 +155,7 @@ pair:
   type: discrete
   placement: multi-turn
   seed: ${attacks._default.seed}
+  generation_config: ${attacks._default.generation_config}
   num_streams: 1
   keep_last_num: 3
   num_steps: 20
@@ -222,10 +220,10 @@ prefilling:
   name: prefilling
   type: discrete
   placement: null
-  max_new_tokens: ${attacks._default.generation_config.max_new_tokens}
   seed: ${attacks._default.seed}
   num_steps: 1
   batch_size: 300
+  generation_config: ${attacks._default.generation_config}
 random_search:
   name: random_search
   type: discrete

@@ -1,5 +1,6 @@
 """Baseline, just prompts with the original prompt."""
 
+import copy
 import logging
 import time
 from dataclasses import dataclass, field
@@ -8,10 +9,10 @@ from typing import Optional
 import torch
 import transformers
 
-from src.attacks import Attack
-# Import the new result classes
-from src.attacks.attack import AttackResult, GenerationConfig, SingleAttackRunResult, AttackStepResult
-from src.lm_utils import generate_ragged_batched, get_losses_batched, prepare_conversation
+from src.attacks import (Attack, AttackResult, AttackStepResult,
+                         GenerationConfig, SingleAttackRunResult)
+from src.lm_utils import (generate_ragged_batched, get_losses_batched,
+                          prepare_conversation)
 from src.types import Conversation
 
 
@@ -50,7 +51,6 @@ class DirectAttack(Attack):
             AttackResult: The result of the attack
         """
         t_start_batch = time.time()
-        all_results = AttackResult()
 
         # --- 1. Prepare Inputs ---
         original_conversations: list[Conversation] = []
@@ -127,8 +127,11 @@ class DirectAttack(Attack):
         time_per_instance = total_batch_time / B
 
         # --- 4. Assemble Results ---
+        runs = []
         for i in range(B):
             original_prompt = original_conversations[i]
+            model_input = copy.deepcopy(original_prompt)
+            model_input[-1]["content"] = ""
             model_completions = completions[i]
             loss = instance_losses[i]
 
@@ -138,10 +141,10 @@ class DirectAttack(Attack):
             # Create the single step result for this direct "attack"
             step_result = AttackStepResult(
                 step=0,
-                model_input=original_prompt,
                 model_completions=model_completions,
                 time_taken=time_per_instance,
                 loss=loss,
+                model_input=model_input,
                 model_input_tokens=model_input_tokens,
             )
 
@@ -152,10 +155,10 @@ class DirectAttack(Attack):
                 total_time=time_per_instance,  # Total time for this run is the instance time
             )
 
-            all_results.runs.append(run_result)
+            runs.append(run_result)
 
         logging.info(f"Direct attack run completed. Total Time: {total_batch_time:.2f}s, "
                      f"Avg Time/Instance: {time_per_instance:.2f}s, "
                      f"Generation Time: {gen_time_total:.2f}s, Loss Calc Time: {loss_time_total:.2f}s")
 
-        return all_results
+        return AttackResult(runs=runs)

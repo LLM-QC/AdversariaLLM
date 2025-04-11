@@ -155,7 +155,7 @@ class BEASTAttack(Attack):
             for attack in per_sample_attacks:
                 attack_conv = [
                     {"role": "user", "content": f"{conversation[0]['content']}{attack}"},
-                    {"role": "assistant", "content": conversation[1]["content"]}
+                    {"role": "assistant", "content": ""}
                 ]
                 attack_conversations.append(attack_conv)
 

@@ -151,7 +151,7 @@ class AutoDANAttack(Attack):
             for prefix in batch_attacks:
                 attack_conversations.append([
                     {"role": "user", "content": prefix + msg},
-                    {"role": "assistant", "content": target}
+                    {"role": "assistant", "content": ""}
                 ])
             adv_prompt_tokens = [torch.cat(prepare_conversation(tokenizer, conv)[0][:-1]) for conv in attack_conversations]
             batch_completions = generate_ragged_batched(

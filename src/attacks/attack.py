@@ -1,11 +1,11 @@
 from dataclasses import dataclass, field
+
+import transformers
+from beartype import beartype
 from beartype.typing import Literal, Optional
 
-from beartype import beartype
-import transformers
 from src.dataset import PromptDataset
 from src.types import Conversation
-
 
 
 @dataclass
@@ -30,7 +30,7 @@ class AttackStepResult:
 
     # Judge scores - should be a dict of judge name -> list[p(harmful|completion1), p(harmful|completion2), ...]
     jailbreak_scores: dict[str, list[float]] = field(default_factory=dict)
-    # Time taken specifically for this step
+    # Time taken specifically for this step.
     time_taken: float = 0.0
 
     # Optional fields, depending on the attack type
@@ -55,7 +55,7 @@ class SingleAttackRunResult:
     # Results for each step of the attack
     steps: list[AttackStepResult] = field(default_factory=list)
 
-    # Total time taken for this entire attack run on the single instance
+    # Total time taken for this entire attack run on a **single instance**
     total_time: float = 0.0
 
 

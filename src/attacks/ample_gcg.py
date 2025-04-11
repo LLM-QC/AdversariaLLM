@@ -78,6 +78,8 @@ class AmpleGCGAttack(Attack):
                 top_k=self.config.generation_config.top_k,
                 num_return_sequences=self.config.generation_config.num_return_sequences,
             )
+            for i in range(len(attack_conversations)):
+                attack_conversations[i][-1]["content"] = ""
             step_results = [
                 AttackStepResult(
                     step=i,

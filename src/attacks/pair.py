@@ -4,19 +4,19 @@ Due to memory limits, we do not use a judge model and just return a score of 1 f
 """
 
 import ast
-import gc
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-import time
 import torch
 import transformers
 from tqdm import trange
 
+from src.attacks import (Attack, AttackResult, AttackStepResult,
+                         GenerationConfig, SingleAttackRunResult)
 from src.io_utils import load_model_and_tokenizer
-from src.lm_utils import prepare_conversation, generate_ragged_batched
-from .attack import Attack, AttackResult, SingleAttackRunResult, AttackStepResult, GenerationConfig
+from src.lm_utils import generate_ragged_batched, prepare_conversation
 from src.types import Conversation
 
 
@@ -76,7 +76,6 @@ class PAIRAttack(Attack):
     ) -> AttackResult:
         runs = []
         for conversation in dataset:
-            # prepare tokens
             run = self.attack_single_prompt(
                 model, tokenizer, conversation
             )
@@ -85,18 +84,14 @@ class PAIRAttack(Attack):
 
     def attack_single_prompt(self, model, tokenizer, conversation: Conversation) -> SingleAttackRunResult:
         # Initialize models
-        target_model = HuggingFace(model, tokenizer)
         # Can share underlying model and save VRAM if attack & target model are the same
-        if self.config.attack_model.id == model.model.name_or_path:
-            attack_model, attack_tokenizer = target_model, tokenizer
+        if self.config.attack_model.id == model.name_or_path:
+            attack_model, attack_tokenizer = model, tokenizer
         else:
             attack_model, attack_tokenizer = load_model_and_tokenizer(self.config.attack_model)
-            attack_model = HuggingFace(attack_model, attack_tokenizer)
 
-        target_model = TargetLM(target_model, tokenizer, self.config.target_model)
-        attack_model = AttackLM(
-            attack_model, attack_tokenizer, self.config.attack_model
-        )
+        target_lm = TargetLM(model, tokenizer, self.config.target_model)
+        attack_lm = AttackLM(attack_model, attack_tokenizer, self.config.attack_model)
         t0 = time.time()
         # TODO: early stopping with judge model
         # judgeLM = load_judge(args)
@@ -120,7 +115,7 @@ class PAIRAttack(Attack):
         for _ in trange(self.config.num_steps):
             t1 = time.time()
             # Get adversarial prompts and improvement
-            extracted_attack_list = attack_model.get_attack(
+            extracted_attack_list = attack_lm.get_attack(
                 convs_list, processed_response_list
             )
             if any([attack is None for attack in extracted_attack_list]):
@@ -134,7 +129,7 @@ class PAIRAttack(Attack):
 
             # Get target responses
             times.append(time.time() - t1)
-            target_response_list, model_input_tokens = target_model.get_response(adv_prompt_list)
+            target_response_list, model_input_tokens = target_lm.get_response(adv_prompt_list)
             token_list.extend(model_input_tokens)
             completions.append(target_response_list)
             logging.info("Finished getting target responses.")
@@ -154,8 +149,8 @@ class PAIRAttack(Attack):
             #     break
         if self.config.generation_config.num_return_sequences > 1:
             additional_completions = generate_ragged_batched(
-                model=target_model.model.model,
-                tokenizer=tokenizer,
+                model=target_lm.model,
+                tokenizer=target_lm.tokenizer,
                 token_list=token_list,
                 max_new_tokens=self.config.generation_config.max_new_tokens,
                 temperature=self.config.generation_config.temperature,
@@ -237,68 +232,6 @@ def fix_llama2_tokens(inputs):
     return inputs
 
 
-class HuggingFace:
-    def __init__(self, model, tokenizer):
-        self.model = model
-        self.tokenizer = tokenizer
-        self.eos_token_ids = [self.tokenizer.eos_token_id]
-
-        if (
-            "vicuna" in self.model.name_or_path.lower()
-            or "llama-2" in self.model.name_or_path.lower()
-        ):
-            self.extend_eos_tokens()
-
-    def batched_generate(
-        self,
-        full_prompts_list: list[str],
-        max_new_tokens: int,
-        temperature: float,
-        top_p: float = 1.0,
-    ):
-        inputs = self.tokenizer(
-            full_prompts_list,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=self.tokenizer.model_max_length-max_new_tokens
-        )
-        if "llama-2" in self.tokenizer.name_or_path.lower():
-            inputs = fix_llama2_tokens(inputs)
-        batch_size = 2
-        outputs_list = []
-
-        for i in range(0, len(inputs["input_ids"]), batch_size):
-            batch_inputs = {k: v[i:i + batch_size].to(self.model.device.index) for k, v in inputs.items()}
-
-            # Batch generation
-            batch_output_ids = self.model.generate(
-                **batch_inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=temperature > 0,
-                eos_token_id=self.eos_token_ids,
-                temperature=temperature if temperature > 0 else 1,
-                top_p=top_p if temperature > 0 else 1,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
-            # If the model is not an encoder-decoder type, slice off the input tokens
-            if not self.model.config.is_encoder_decoder:
-                batch_output_ids = batch_output_ids[:, inputs["input_ids"].shape[1] :]
-            outputs_list.extend(self.tokenizer.batch_decode(batch_output_ids, skip_special_tokens=True))
-
-        for key in inputs:
-            inputs[key].to("cpu")
-        del inputs, batch_output_ids
-        gc.collect()
-        torch.cuda.empty_cache()
-
-        return outputs_list
-
-    def extend_eos_tokens(self):
-        # Add closing braces for Vicuna/Llama eos when using attacker model
-        self.eos_token_ids.extend([self.tokenizer.encode("}")[1], 29913, 9092, 16675])
-
-
 class AttackLM:
     """
     Base class for attacker language models.
@@ -309,7 +242,7 @@ class AttackLM:
 
     def __init__(
         self,
-        model: HuggingFace,
+        model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
         cfg,
     ):
@@ -320,7 +253,7 @@ class AttackLM:
         self.max_attempts = cfg.max_attempts
         self.top_p = cfg.top_p
 
-    def get_attack(self, convs_list, prompts_list):
+    def get_attack(self, convs_list: list[Conversation], prompts_list: list[str]):
         """
         Generates responses for a batch of conversations and prompts using a language model.
         Only valid outputs in proper JSON format are returned. If an output isn't generated
@@ -338,7 +271,6 @@ class AttackLM:
         assert len(convs_list) == len(prompts_list), "Mismatch betw. #convs & #prompts."
 
         tokenizer = self.tokenizer
-        indices_to_regenerate = list(range(len(convs_list)))
         valid_outputs = [None] * len(convs_list)
 
         # Initalize the attack model's generated output to match format
@@ -347,47 +279,39 @@ class AttackLM:
         else:
             init_message = """{\"improvement\": \""""
 
-        full_prompts = []
+        # full_prompts = []
+        full_tokens = []
         # Add prompts and initial seeding messages to conversations
         for conv, prompt in zip(convs_list, prompts_list):
             conv.append({"role": "user", "content": prompt})
             conv.append({"role": "assistant", "content": init_message})
-            full_prompt = tokenizer.apply_chat_template(
-                conv,
-                add_generation_prompt=False,
-                tokenize=False,
-                continue_final_message=True
-            )
-            while len(tokenizer(full_prompt).input_ids) + self.max_new_tokens > tokenizer.model_max_length and len(conv) > 3:
+
+            tokens = [t for tokens in prepare_conversation(tokenizer, conv) for t in tokens]
+            tokens = torch.cat(tokens)
+
+            while tokens.size(0) + self.max_new_tokens > tokenizer.model_max_length and len(conv) > 3:
                 # maintain system message, remove user+assistant message pairs until we fit
                 # in context window
                 conv = conv[:1] + conv[3:]
-                full_prompt = tokenizer.apply_chat_template(
-                    conv,
-                    add_generation_prompt=False,
-                    tokenize=False,
-                    continue_final_message=True
-                )
-            # Remove BOS token, will get added again later if necessary
-            if tokenizer.bos_token:
-                full_prompt = full_prompt.removeprefix(tokenizer.bos_token)
-            # Ensure tokenizer didn't add superfluous stuff at the end which would
-            # interfere with generation
-            if not full_prompt.endswith("\""):
-                idx = full_prompt[::-1].index("\"")
-                full_prompt = full_prompt[:-idx]
-            full_prompts.append(full_prompt)
 
+                tokens = [t for tokens in prepare_conversation(tokenizer, conv) for t in tokens]
+                tokens = torch.cat(tokens)
+            full_tokens.append(tokens)
+
+        indices_to_regenerate = list(range(len(convs_list)))
         for _ in range(self.max_attempts):
             # Subset conversations based on indices to regenerate
-            full_prompts_subset = [full_prompts[i] for i in indices_to_regenerate]
             # Generate outputs
-            outputs_list = self.model.batched_generate(
-                full_prompts_subset,
+            token_list = [full_tokens[i] for i in indices_to_regenerate]
+            outputs_list = generate_ragged_batched(
+                model=self.model,
+                tokenizer=self.tokenizer,
+                token_list=token_list,
                 max_new_tokens=self.max_new_tokens,
                 temperature=self.temperature,
                 top_p=self.top_p,
             )
+            outputs_list = [o[0] for o in outputs_list]  # only care about a single completion
             # Check for valid outputs and update the list
             new_indices_to_regenerate = []
             for i, full_output in enumerate(outputs_list):
@@ -424,7 +348,7 @@ class TargetLM:
 
     def __init__(
         self,
-        model: HuggingFace,
+        model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
         cfg,
     ):
@@ -437,10 +361,10 @@ class TargetLM:
     def get_response(self, conversations: list[Conversation]) -> tuple[list[str], list[list[int]]]:
         token_list = []
         for conversation in conversations:
-            token_list.append(torch.cat(prepare_conversation(self.tokenizer, conversation)[0][:5]))
+            token_list.append(torch.cat(prepare_conversation(self.tokenizer, conversation)[0][:-1]))
 
         outputs_list = generate_ragged_batched(
-            model=self.model.model,
+            model=self.model,
             tokenizer=self.tokenizer,
             token_list=token_list,
             max_new_tokens=self.max_new_tokens,

@@ -1,14 +1,14 @@
 """Baseline, just prompts the original prompt."""
 
 import time
-from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Optional
+from dataclasses import dataclass, field
 
 import torch
 import transformers
 
-from src.attacks import Attack, AttackResult
-from src.lm_utils import generate_ragged_batched, prepare_tokens
+from src.attacks import Attack, AttackResult, GenerationConfig, SingleAttackRunResult, AttackStepResult
+from src.lm_utils import generate_ragged_batched, prepare_conversation
 
 
 @dataclass
@@ -16,11 +16,9 @@ class PrefillingConfig:
     name: str = "prefilling"
     type: str = "discrete"
     placement: Optional[str] = None
-    generate_completions: Literal["all", "best", "last"] = "all"
     num_steps: int = 1
     seed: int = 0
-    batch_size: int = 4
-    max_new_tokens: int = 256
+    generation_config: GenerationConfig = field(default_factory=GenerationConfig)
 
 
 class PrefillingAttack(Attack):
@@ -34,39 +32,43 @@ class PrefillingAttack(Attack):
         tokenizer: transformers.AutoTokenizer,
         dataset: torch.utils.data.Dataset,
     ) -> AttackResult:
-        result = AttackResult([], [], [], [], [])
-        token_lists = []
-        targets = []
-        for msg, target in dataset:
-            result.prompts.append(msg)
-            result.attacks.append([""])
-            targets.append(target)
-            token_lists.append(
-                prepare_tokens(
-                    tokenizer,
-                    msg["content"],
-                    target,
-                    attack="",
-                    placement="suffix",
-                )
-            )
+        t0 = time.time()
+        token_list = []
+        # 1. Prepare inputs
+        for conversation in dataset:
+            toks = prepare_conversation(tokenizer, conversation)
+            toks_flat = [t for turn_toks in toks for t in turn_toks]
+            token_list.append(torch.cat(toks_flat))
 
-        def chunks(lst, n):
-            """Yield successive n-sized chunks from lst."""
-            for i in range(0, len(lst), n):
-                yield lst[i : i + n]
-
-        for chunk in chunks(token_lists, self.config.batch_size):
-            t0 = time.time()
-            completions = generate_ragged_batched(
-                model,
-                tokenizer,
-                token_list=[torch.cat(c, dim=0) for c in chunk],
-                max_new_tokens=self.config.max_new_tokens,
-                initial_batch_size=self.config.batch_size,
+        completions = generate_ragged_batched(
+            model,
+            tokenizer,
+            token_list=token_list,
+            max_new_tokens=self.config.generation_config.max_new_tokens,
+            temperature=self.config.generation_config.temperature,
+            top_p=self.config.generation_config.top_p,
+            top_k=self.config.generation_config.top_k,
+            num_return_sequences=self.config.generation_config.num_return_sequences,
+        )
+        runs = []
+        for i in range(len(completions)):
+            completions_i = completions[i]
+            for j in range(len(completions_i)):
+                completions_i[j] = dataset[i][-1]["content"] + completions_i[j]
+            run = SingleAttackRunResult(
+                original_prompt=dataset[i],
+                steps=[
+                    AttackStepResult(
+                        step=0,
+                        model_completions=completions[i],
+                        time_taken=(time.time() - t0) / len(completions),
+                        loss=None,
+                        model_input=dataset[i],
+                        model_input_tokens=token_list[i].tolist(),
+                    )
+                ],
+                total_time=(time.time() - t0) / len(completions),
             )
-            for c, t in zip(completions, targets):
-                result.losses.append([None])
-                result.completions.append([t + c])
-                result.times.append([time.time() - t0])
-        return result
+            runs.append(run)
+
+        return AttackResult(runs=runs)

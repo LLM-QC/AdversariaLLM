@@ -656,7 +656,13 @@ def prepare_conversation(
     n_tokenized_clean = 0
     n_tokenized_attack = 0
     n_turns = len(conversation)
-    for i in range(1, n_turns, 2):
+
+    if conversation[0]["role"] == "system":
+        start_idx = 2
+    else:
+        start_idx = 1
+
+    for i in range(start_idx, n_turns, 2):
         # We work our way through the conversation, section by section.
 
         # First, lets get the tokens before the user message.
@@ -719,7 +725,7 @@ def prepare_conversation(
             if sep[0] == 29871:
                 sep = sep[1:]
         elif "gemma-2" in tokenizer.name_or_path.lower():
-            if i != 1:
+            if i != start_idx:
                 t = torch.tensor([235248,    108])
                 sep = torch.cat([t, sep])
         target = tokenized_clean[n_tokenized_clean:-suffix_len]
