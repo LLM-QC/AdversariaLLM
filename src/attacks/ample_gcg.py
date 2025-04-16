@@ -35,6 +35,7 @@ class PrompterLMConfig:
 class AmpleGCGConfig:
     name: str = "ample_gcg"
     type: str = "discrete"
+    version: str = ""
     placement: str = "suffix"
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     seed: int = 0

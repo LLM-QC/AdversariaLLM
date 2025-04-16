@@ -44,6 +44,7 @@ from .attack import Attack, AttackResult, GenerationConfig, SingleAttackRunResul
 class GCGConfig:
     name: str = "gcg"
     type: str = "discrete"
+    version: str = ""
     placement: str = "suffix"
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     num_steps: int = 250

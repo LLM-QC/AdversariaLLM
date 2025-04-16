@@ -15,7 +15,7 @@ from src.lm_utils import generate_ragged_batched, prepare_conversation
 class PrefillingConfig:
     name: str = "prefilling"
     type: str = "discrete"
-    placement: Optional[str] = None
+    version: str = ""
     num_steps: int = 1
     seed: int = 0
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)

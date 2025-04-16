@@ -18,6 +18,7 @@ from src.lm_utils import (generate_ragged_batched, get_disallowed_ids,
 class RandomSearchConfig:
     name: str = "random_search"
     type: str = "discrete"
+    version: str = ""
     placement: str = "suffix"
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     num_steps: int = 100

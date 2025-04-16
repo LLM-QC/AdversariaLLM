@@ -23,6 +23,7 @@ from .attack import Attack, AttackResult
 class GCGJudgeConfig:
     name: str = "gcg_judge"
     type: str = "discrete"
+    version: str = ""
     placement: str = "suffix"
     generate_completions: Literal["all", "best", "last"] = "all"
     num_steps: int = 250

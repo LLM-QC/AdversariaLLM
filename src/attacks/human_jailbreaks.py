@@ -16,7 +16,7 @@ from src.lm_utils import generate_ragged_batched, get_losses_batched, prepare_co
 class HumanJailbreaksConfig:
     name: str = "human_jailbreaks"
     type: str = "discrete"
-    placement: str = "prompt"
+    version: str = ""
     seed: int = 0
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
 

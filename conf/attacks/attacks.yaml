@@ -11,7 +11,7 @@ _default:
 ample_gcg:
   name: ample_gcg
   type: discrete
-  placement: suffix
+  version: 0.0.1
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
   num_steps: 200
@@ -34,7 +34,7 @@ ample_gcg:
 autodan:
   name: autodan
   type: discrete
-  placement: prefix
+  version: 0.0.1
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
   num_steps: 100
@@ -56,7 +56,7 @@ autodan:
 beast:
   name: beast
   type: discrete
-  placement: suffix
+  version: 0.0.1
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
   num_steps: 40
@@ -70,12 +70,13 @@ beast:
 direct:
   name: direct
   type: discrete
-  placement: null
+  version: 0.0.1
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
 gcg:
   name: gcg
   type: discrete
+  version: 0.0.1
   placement: suffix
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
@@ -101,6 +102,7 @@ gcg:
 gcg_refusal:
   name: gcg_refusal
   type: discrete
+  version: 0.0.1
   placement: suffix
   max_new_tokens: ${attacks._default.generation_config.max_new_tokens}
   seed: ${attacks._default.seed}
@@ -126,6 +128,7 @@ gcg_refusal:
 gcg_judge:
   name: gcg_judge
   type: discrete
+  version: 0.0.1
   placement: suffix
   max_new_tokens: ${attacks._default.generation_config.max_new_tokens}
   seed: ${attacks._default.seed}
@@ -147,14 +150,14 @@ gcg_judge:
 human_jailbreaks:
   name: human_jailbreaks
   type: discrete
-  placement: prompt
+  version: 0.0.1
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
   num_steps: 1
 pair:
   name: pair
   type: discrete
-  placement: multi-turn
+  version: 0.0.1
   seed: ${attacks._default.seed}
   generation_config: ${attacks._default.generation_config}
   num_streams: 1
@@ -183,23 +186,31 @@ pair:
 pgd:
   name: pgd
   type: continuous
+  version: 0.0.1
+  placement: suffix
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
   num_steps: 100
-  batch_size: 16
   optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
   epsilon: 1.
   alpha: 0.001
   embedding_scale: null
   normalize_alpha: true
   normalize_gradient: false
-  projection: l2
   original_model: null
   tie_logits: 0.0
   tie_features: 0.0
+  projection: l2
+  attack_space: embedding
+  optimizer: "FGSM"
+  optimizer_config:
+    weight_decay: 0.0
+    betas: [0.9, 0.999]
 pgd_one_hot:
   name: pgd_one_hot
   type: continuous
+  version: 0.0.1
+  placement: suffix
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
   num_steps: 100
@@ -221,7 +232,7 @@ pgd_one_hot:
 prefilling:
   name: prefilling
   type: discrete
-  placement: null
+  version: 0.0.1
   seed: ${attacks._default.seed}
   num_steps: 1
   batch_size: 300
@@ -229,6 +240,7 @@ prefilling:
 random_search:
   name: random_search
   type: discrete
+  version: 0.0.1
   placement: "suffix"
   seed: ${attacks._default.seed}
   num_steps: 100

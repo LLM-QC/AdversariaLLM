@@ -22,6 +22,7 @@ from .attack import Attack, AttackResult
 class GCGRefusalConfig:
     name: str = "gcg_refusal"
     type: str = "discrete"
+    version: str = ""
     placement: str = "suffix"
     generate_completions: Literal["all", "best", "last"] = "all"
     num_steps: int = 250
@@ -45,6 +46,7 @@ class GCGRefusalConfig:
     max_new_tokens: int = 256
     max_new_target_tokens: int = 64
     grow_target: bool = False
+    version: str = ""
 
 def mellowmax(t: Tensor, alpha=1.0, dim=-1):
     return (
@@ -1264,7 +1266,9 @@ def filter_data(model, tokenizer, harmful, harmless):
 
 @torch.no_grad()
 def toxify(model, tokenizer, batch_size=16, from_cache=True):
-    cache_root = "/ceph/ssd/staff/beyer/llm-quick-check/cache"
+    current_file_path = os.path.abspath(__file__)
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file_path)))
+    cache_root = os.path.join(root_dir, "cache")
     if from_cache and os.path.exists(f"{cache_root}/{model.name_or_path}/ablation_dir.pt"):
         ablation_dir = torch.load(f"{cache_root}/{model.name_or_path}/ablation_dir.pt")
         blocks = get_blocks(model)
@@ -1274,7 +1278,7 @@ def toxify(model, tokenizer, batch_size=16, from_cache=True):
         fwd_hooks = [(attn, get_direction_ablation_output_hook(direction=ablation_dir["direction"])) for attn in attn_modules]
         fwd_hooks += [(mlp, get_direction_ablation_output_hook(direction=ablation_dir["direction"])) for mlp in mlp_modules]
         return fwd_pre_hooks, fwd_hooks
-    data_root = "/ceph/ssd/staff/beyer/llm-quick-check/data"
+    data_root = os.path.join(root_dir, "data")
     harmless_cfg = RefusalDirectionDataConfig(
         name="refusal_direction_data",
         path=f"{data_root}/refusal_direction",

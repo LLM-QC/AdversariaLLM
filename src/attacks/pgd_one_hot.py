@@ -31,6 +31,7 @@ class PGDOneHotConfig:
     name: str = "pgd_one_hot"
     type: str = "continuous"
     placement: str = "suffix"
+    version: str = ""
     num_steps: int = 100
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     seed: int = 0
@@ -587,13 +588,13 @@ class SAM(torch.optim.Optimizer):
     def _grad_norm(self):
         shared_device = self.param_groups[0]["params"][0].device  # put everything on the same device, in case of model parallelism
         norm = torch.norm(
-                    torch.stack([
-                        ((torch.abs(p) if group["adaptive"] else 1.0) * p.grad).norm(p=2).to(shared_device)
-                        for group in self.param_groups for p in group["params"]
-                        if p.grad is not None
-                    ]),
-                    p=2
-               )
+            torch.stack([
+                ((torch.abs(p) if group["adaptive"] else 1.0) * p.grad).norm(p=2).to(shared_device)
+                for group in self.param_groups for p in group["params"]
+                if p.grad is not None
+            ]),
+            p=2
+        )
         return norm
 
     def load_state_dict(self, state_dict):

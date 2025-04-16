@@ -53,7 +53,7 @@ class JudgeModelConfig:
 class PairConfig:
     name: str = "pair"
     type: str = "discrete"
-    placement: str = "multi-turn"
+    version: str = ""
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     num_streams: int = 1
     keep_last_num: int = 3

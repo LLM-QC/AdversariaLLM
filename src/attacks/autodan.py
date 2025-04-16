@@ -44,6 +44,7 @@ class MutateModelConfig:
 class AutoDANConfig:
     name: str = "autodan"
     type: str = "discrete"
+    version: str = ""
     placement: str = "prefix"
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     num_steps: int = 100

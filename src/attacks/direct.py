@@ -4,7 +4,6 @@ import copy
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 import torch
 import transformers
@@ -21,7 +20,7 @@ class DirectConfig:
     """Config for the Direct attack."""
     name: str = "direct"
     type: str = "discrete"
-    placement: Optional[str] = None
+    version: str = ""
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     seed: int = 0
 

@@ -22,7 +22,7 @@ from src.types import Conversation
 class BEASTConfig:
     name: str = "beast"
     type: str = "discrete"
-    placement: str = "suffix"
+    version: str = ""
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     num_steps: int = 30  # also the suffix length
     seed: int = 0
