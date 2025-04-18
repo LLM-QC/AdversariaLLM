@@ -97,6 +97,15 @@ allenai/Llama-3.1-Tulu-3-8B-DPO:
   dtype: bfloat16
   chat_template: null
   trust_remote_code: True
+mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated:
+  id: mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated
+  tokenizer_id: meta-llama/Meta-Llama-3.1-8B-Instruct
+  short_name: Llama
+  developer_name: mlabonne
+  compile: False
+  dtype: bfloat16
+  chat_template: llama-3-instruct
+  trust_remote_code: True
 meta-llama/Meta-Llama-3-8B-Instruct:
   id: meta-llama/Meta-Llama-3-8B-Instruct
   tokenizer_id: meta-llama/Meta-Llama-3-8B-Instruct
