@@ -211,12 +211,10 @@ pgd_one_hot:
   type: continuous
   version: 0.0.1
   placement: suffix
+  num_steps: 100
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
-  num_steps: 100
-  batch_size: 16
   optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
-  epsilon: 100000.
   optimizer: "Adam"  # "Adam" or "SAM"
   projection: "simplex"  # "simplex" or "l2" or "l1"
   alpha: 0.001

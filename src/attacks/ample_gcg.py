@@ -91,7 +91,6 @@ class AmpleGCGAttack(Attack):
                 AttackStepResult(
                     step=i,
                     model_completions=batch_completions[i],
-                    jailbreak_scores={},
                     time_taken=(t1 - t0) / len(batch_attacks),
                     loss=batch_losses[i],
                     model_input=attack_conversations[i],

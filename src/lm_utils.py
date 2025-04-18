@@ -144,6 +144,9 @@ def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | No
                 raise TypeError(f"Wrapped functions may only return Tensors or lists, not {types}")
         outputs = tuple(outputs_processed)
         assert all(len(o) == input_length for o in outputs)
+    elif all(isinstance(x, dict) for x in outputs):
+        outputs = {k: [item for o in outputs for item in o[k]] for k in outputs[0].keys()}
+        assert all(len(v) == input_length for v in outputs.values())
     else:
         outputs = [item for sublist in outputs for item in sublist]
         assert len(outputs) == input_length

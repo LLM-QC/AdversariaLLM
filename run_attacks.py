@@ -25,7 +25,7 @@ def should_run(cfg: DictConfig, name: str | None) -> list[tuple[str, DictConfig]
 
 @hydra.main(config_path="./conf", config_name="config", version_base="1.3")
 @print_exceptions
-def main(cfg: DictConfig) -> None:
+def run_attacks(cfg: DictConfig) -> None:
     date_time_string = datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
     log_file_path = os.path.join(cfg.save_dir, f"{date_time_string}/run.json")
     logging.info("-------------------")
@@ -60,4 +60,4 @@ def main(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_attacks()

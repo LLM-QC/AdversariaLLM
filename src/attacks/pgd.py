@@ -302,9 +302,10 @@ class PGDAttack(Attack):
                      time_taken=batch_times[i][step],
                      loss=batch_losses[i][step],
                  ))
-
+             input_conversation = original_conversations_batch[i]
+             input_conversation[-1]["content"] = ""
              runs.append(SingleAttackRunResult(
-                 original_prompt=original_conversations_batch[i],
+                 original_prompt=input_conversation,
                  steps=steps,
                  total_time=(t_end - t_start) / B
              ))
