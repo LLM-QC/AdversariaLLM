@@ -5,32 +5,39 @@ adv_behaviors:
   categories: ['chemical_biological', 'illegal', 'misinformation_disinformation', 'harmful', 'harassment_bullying', 'cybercrime_intrusion'] #,'copyright']
   seed: 0
   idx: null
+  shuffle: true
 alpaca:
   name: alpaca
   messages_path: ${root_dir}/data/alpaca.json
   seed: 0
   idx: null
+  shuffle: true
 jbb_behaviors:
   name: jbb_behaviors
   seed: 0
   idx: null
+  shuffle: true
 or_bench:
   name: or_bench
   seed: 0
   idx: null
+  shuffle: true
 xs_test:
   name: xs_test
   seed: 0
   idx: null
+  shuffle: true
 refusal_direction_data:
   name: refusal_direction_data
   path: ${root_dir}/data/refusal_direction/
   split: train
   seed: 0
   idx: null
+  shuffle: true
 strong_reject:
   name: strong_reject
   path: ${root_dir}/data/strong_reject/
   split: train
   seed: 0
   idx: null
+  shuffle: true
