@@ -235,7 +235,7 @@ def generate_ragged(
                 logits = top_p_filtering(logits, top_p)
             if top_k > 0:
                 logits = top_k_filtering(logits, top_k)
-            next_tokens = torch.multinomial(logits.softmax(dim=-1), num_samples=1)
+            next_tokens = torch.multinomial(logits.softmax(dim=-1), num_samples=1)[:, 0]
         else:
             next_tokens = logits.argmax(dim=-1)
         return next_tokens
