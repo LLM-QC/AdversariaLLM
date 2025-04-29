@@ -2,11 +2,12 @@ import gc
 import json
 import logging
 import os
-import time
 from dataclasses import asdict, dataclass
 
 import torch
 from omegaconf import OmegaConf
+from pymongo import MongoClient
+from pymongo.synchronous.database import Database
 from transformers.utils.logging import disable_progress_bar
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
@@ -227,7 +228,7 @@ class RunConfig:
     attack_params: dict
 
 
-def log_attack(run_config: RunConfig, result: AttackResult, log_file: str):
+def log_attack(run_config: RunConfig, result: AttackResult, save_dir: str, date_time_string: str):
     # Create a structured log message as a JSON object
     OmegaConf.resolve(run_config.attack_params)
     OmegaConf.resolve(run_config.dataset_params)
@@ -236,22 +237,81 @@ def log_attack(run_config: RunConfig, result: AttackResult, log_file: str):
         "config": OmegaConf.to_container(OmegaConf.structured(run_config), resolve=True)
     }
     log_message.update(asdict(result))
-    # merge into log file if it exists already
-    # try a few times to make sure we dont get contention issues
-    for _ in range(3):
-        try:
-            with open(log_file, "r") as f:
-                log_data = json.load(f)
-            break
-        except FileNotFoundError:
-            log_data = []
-            break
-        except json.decoder.JSONDecodeError:
-            time.sleep(1)
-
-    log_data.append(log_message)
+    # Find the first available run_i.json file
+    i = 0
+    log_dir = os.path.join(save_dir, date_time_string)
+    while os.path.exists(os.path.join(log_dir, str(i), f"run.json")):
+        i += 1
+    log_file = os.path.join(log_dir, str(i), f"run.json")
 
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
     with open(log_file, "w") as f:
-        json.dump(log_data, f, indent=2, cls=CompactJSONEncoder)
+        json.dump(log_message, f, indent=2, cls=CompactJSONEncoder)
     logging.info(f"Attack logged to {log_file}")
+    log_config_to_db(run_config, result, log_file)
+
+
+def get_mongodb_connection() -> Database:
+    """Get a MongoDB connection.
+
+    Connects to MongoDB using connection details from a config file or environment
+    variables. Falls back to a default localhost connection if not specified.
+    """
+    user = os.environ.get("MONGODB_USER")
+    password = os.environ.get("MONGODB_PASSWORD")
+    host = os.environ.get("MONGODB_HOST")
+    mongo_uri = os.environ.get("MONGODB_URI", f"mongodb://{user}:{password}@{host}?authSource={user}")
+    client = MongoClient(mongo_uri)
+    db_name = os.environ.get("MONGODB_DB", user)
+    return client[db_name]
+
+
+def log_config_to_db(run_config, result, log_file):
+    db = get_mongodb_connection()
+    collection = db.runs
+
+    idx = run_config.dataset_params.idx
+    if idx is None:
+        idx = [i for i in range(len(result.runs))]
+    elif isinstance(idx, int):
+        idx = [idx]
+
+    for i in idx:
+        run_config.dataset_params.idx = i
+        config_data = {
+            "config": OmegaConf.to_container(OmegaConf.structured(run_config), resolve=True),
+            "log_file": log_file,
+            "scored_by": []
+        }
+        collection.insert_one(config_data)
+
+
+def filter_config(run_config: RunConfig, dset_len: int) -> bool:
+    db = get_mongodb_connection()
+    collection = db.runs
+
+    OmegaConf.resolve(run_config.attack_params)
+    OmegaConf.resolve(run_config.dataset_params)
+    OmegaConf.resolve(run_config.model_params)
+    original_idx = run_config.dataset_params.idx
+
+    if original_idx is None:
+        idx = list(range(dset_len))
+    elif isinstance(original_idx, int):
+        idx = [original_idx]
+    else:
+        idx = original_idx
+
+    filtered_idx = []
+    for i in idx:
+        run_config.dataset_params.idx = i
+        config_data = OmegaConf.to_container(OmegaConf.structured(run_config), resolve=True)
+        if collection.find_one({"config": config_data}):
+            print(f"Skipping {run_config.model} {run_config.dataset} {run_config.attack} idx={i} because it already exists")
+            continue
+        filtered_idx.append(i)
+
+    if not filtered_idx:
+        return None
+    run_config.dataset_params.idx = filtered_idx
+    return run_config

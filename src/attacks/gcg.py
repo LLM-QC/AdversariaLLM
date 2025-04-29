@@ -34,7 +34,7 @@ from transformers import DynamicCache, PreTrainedModel, PreTrainedTokenizer
 
 from src.lm_utils import (filter_suffix, generate_ragged_batched,
                           get_disallowed_ids, prepare_conversation,
-                          with_max_batchsize)
+                          with_max_batchsize, TokenMergeError)
 
 from src.dataset import PromptDataset
 from .attack import Attack, AttackResult, GenerationConfig, SingleAttackRunResult, AttackStepResult
@@ -146,11 +146,18 @@ class GCGAttack(Attack):
         runs = []
         for conversation in dataset:
             t0 = time.time()
-            attack_conversation = [
-                {"role": "user", "content": conversation[0]["content"] + self.config.optim_str_init},
-                {"role": "assistant", "content": conversation[1]["content"]},
-            ]
-            pre_ids, attack_prefix_ids, prompt_ids, attack_suffix_ids, post_ids, target_ids = prepare_conversation(tokenizer, conversation, attack_conversation)[0]
+            try:
+                attack_conversation = [
+                    {"role": "user", "content": conversation[0]["content"] + self.config.optim_str_init},
+                    {"role": "assistant", "content": conversation[1]["content"]},
+                ]
+                pre_ids, attack_prefix_ids, prompt_ids, attack_suffix_ids, post_ids, target_ids = prepare_conversation(tokenizer, conversation, attack_conversation)[0]
+            except TokenMergeError:
+                attack_conversation = [
+                    {"role": "user", "content": conversation[0]["content"] + " " + self.config.optim_str_init},
+                    {"role": "assistant", "content": conversation[1]["content"]},
+                ]
+                pre_ids, attack_prefix_ids, prompt_ids, attack_suffix_ids, post_ids, target_ids = prepare_conversation(tokenizer, conversation, attack_conversation)[0]
 
             pre_ids = pre_ids.unsqueeze(0).to(model.device)
             # attack_prefix_ids = attack_prefix_ids.unsqueeze(0).to(model.device)
@@ -417,6 +424,7 @@ class SubstitutionSelectionStrategy:
         self.post_embeds = post_embeds
         self.target_embeds = target_embeds
         self.target_ids = target_ids
+        self.grad_buffer = None
 
     def __call__(
         self,
@@ -517,14 +525,17 @@ class SubstitutionSelectionStrategy:
                 random_positions = torch.randint(0, grad_ids_batch.shape[1], (current_batch_size, 1), device=ids.device)
                 random_indices = torch.tensor([random.choice(allowed_ids) for _ in range(current_batch_size)],
                                              device=ids.device).unsqueeze(1)
-
-                for i in range(current_batch_size):
-                    grad_ids_batch[i, random_positions[i]] = random_indices[i]
-
-                batch_grads = self.compute_token_gradient(grad_ids_batch, model)
+                grad_ids_batch.scatter_(1, random_positions, random_indices)
+                batch_grads = self.compute_token_gradient(grad_ids_batch, model).detach()
                 all_grads += batch_grads.sum(0)
             grad = all_grads / n_smoothing
-
+        grad_momentum = self.config.grad_momentum
+        if grad_momentum > 0.0:
+            if self.grad_buffer is None:
+                self.grad_buffer = grad
+            else:
+                self.grad_buffer = grad_momentum * self.grad_buffer + (1 - grad_momentum) * grad
+            grad = self.grad_buffer
         n_optim_tokens = len(ids)
         original_ids = ids.repeat(search_width, 1)
 

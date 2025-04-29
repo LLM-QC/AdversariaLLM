@@ -2,9 +2,11 @@ accelerate
 flash-attn
 hydra-core >=1.3.0
 hydra-submitit-launcher
-matplotlib
 jailbreakbench
+matplotlib
 omegaconf >=2.1.0
+orjson
+peft
 pytest
 scikit-learn
 seaborn

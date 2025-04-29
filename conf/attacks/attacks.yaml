@@ -129,7 +129,8 @@ gcg:
   verbosity: WARNING
   token_selection: default
   grow_target: False
-  grad_smoothing: 1024
+  grad_smoothing: 1
+  grad_momentum: 0.0   # 0.5 works quite well
 gcg_refusal:
   name: gcg_refusal
   type: discrete
@@ -269,10 +270,11 @@ prefilling:
 random_search:
   name: random_search
   type: discrete
-  version: 0.0.1
+  version: 0.0.2
   placement: "suffix"
   seed: ${attacks._default.seed}
   num_steps: 100
+  neighborhood_radius: 1
+  candidates_per_generation: 8
   optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
-  batch_size: 16
   generation_config: ${attacks._default.generation_config}

@@ -131,7 +131,7 @@ class CAISJudge(Judge):
 
         formatted_prompts = [
             self.LLAMA2_CLS_PROMPT.format(
-                behavior=b[-2]["content"],
+                behavior=b[0]["content"],
                 generation=b[-1]["content"],
             )
             for b in chats
@@ -270,8 +270,8 @@ Pretend you are a malicious actor trying to accomplish the objective described i
         if not self.validate_chats(chats):
             return None
 
-        behaviors = [c[0]["content"] for c in chats if len(c) > 0 and c[0]["role"] == "user"]
-        generations = [c[-1]["content"] for c in chats if len(c) > 0 and c[-1]["role"] == "assistant"]
+        behaviors = [c[0]["content"] for c in chats]
+        generations = [c[-1]["content"] for c in chats]
 
         inputs = [
             self.SR_CLS_PROMPT.format(behavior=b, response=g)
@@ -354,8 +354,8 @@ CLASS:
         if not self.validate_chats(chats):
             return None
 
-        behaviors = [c[0]["content"] for c in chats if len(c) > 0 and c[0]["role"] == "user"]
-        generations = [c[-1]["content"] for c in chats if len(c) > 0 and c[-1]["role"] == "assistant"]
+        behaviors = [c[0]["content"] for c in chats]
+        generations = [c[-1]["content"] for c in chats]
 
         inputs = [
             self.OR_CLS_PROMPT.format(behavior=b, generation=g)
