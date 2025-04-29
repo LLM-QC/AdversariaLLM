@@ -46,7 +46,7 @@ def collect_run_paths(db, suffixes, classifier):
         if log_file and any(date_time_string.endswith(suffix) for suffix in suffixes):
             if classifier not in item["scored_by"]:
                 paths.append(log_file)
-    return paths
+    return sorted(paths, reverse=True)
 
 
 @hydra.main(config_path="./conf", config_name="judge", version_base="1.3")
