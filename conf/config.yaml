@@ -16,6 +16,7 @@ hydra:
 
 name: testing
 save_dir: ${root_dir}/outputs/
+overwrite: false
 
 # overrides for parallelism
 attack_name: null

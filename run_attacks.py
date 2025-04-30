@@ -51,7 +51,7 @@ def run_attacks(cfg: DictConfig) -> None:
                     dataset_params,
                     attack_params,
                 )
-                run_config = filter_config(run_config, dset_len)
+                run_config = filter_config(run_config, dset_len, overwrite=cfg.overwrite)
                 if run_config is not None:
                     all_run_configs.append(run_config)
 

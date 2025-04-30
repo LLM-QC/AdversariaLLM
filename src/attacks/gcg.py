@@ -82,7 +82,15 @@ def compute_loss(shift_logits: Tensor, shift_labels: Tensor, loss_type: str, mel
     Raises:
         NotImplementedError: If the loss type is not implemented
     """
-    if loss_type == "mellowmax":
+    if loss_type == "ce":
+        # Standard cross-entropy loss
+        loss = torch.nn.functional.cross_entropy(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1),
+            reduction="none",
+        )
+        loss = loss.view(shift_logits.shape[0], -1).mean(dim=-1)
+    elif loss_type == "mellowmax":
         label_logits = torch.gather(
             shift_logits, -1, shift_labels.unsqueeze(-1)
         ).squeeze(-1)
@@ -104,23 +112,49 @@ def compute_loss(shift_logits: Tensor, shift_labels: Tensor, loss_type: str, mel
 
         loss = max_other_logits - target_logits  # (B, T)
         loss = loss.clamp_min(-1e-3).mean(dim=-1)  # (B, T) -> (B,)
+    # label-free objectives:
     elif loss_type == "entropy":
-        # Compute entropy of predicted logits
+        # Maximize entropy of predicted logits
         log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
         probs = torch.exp(log_probs)
         entropy = -(probs * log_probs).sum(dim=-1)  # (B, T)
         # We want to maximize entropy, so we negate it to make it a loss to minimize
         loss = -entropy.mean(dim=-1)  # (B, T) -> (B,)
+    elif loss_type == "entropy_first_token":
+        # Maximize entropy of first token
+        log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
+        probs = torch.exp(log_probs)
+        entropy = -(probs * log_probs).sum(dim=-1)  # (B, T)
+        # We want to maximize entropy, so we negate it to make it a loss to minimize
+        loss = -entropy[:, 0]  # (B, T) -> (B,)
+    elif loss_type == "entropy_first_token_high_then_low":
+        log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
+        probs = torch.exp(log_probs)
+        entropy = -(probs * log_probs).sum(dim=-1)  # (B, T)
+        # Maximize entropy of first token
+        # Minimize entropy of all other tokens
+        loss = -entropy[:, 0] + entropy[:, 1:].mean(dim=-1)  # (B, T) -> (B,)
+    elif loss_type == "entropy_adaptive":
+        log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
+        probs = torch.exp(log_probs)
+        entropy = -(probs * log_probs).sum(dim=-1)  # (B, T)
+        # Maximize entropy of first token
+        # Minimize entropy of all other tokens
+        mask = (probs[:, 0].max(dim=-1).values < 0.7).any(dim=-1)  # (B, D) -> (,)
+        loss = -entropy[:, 0] + mask * entropy[:, 1:].mean(dim=-1)  # (B, T) -> (B,)
     elif loss_type == "smallmax":
         max_logits = shift_logits.max(dim=-1).values
         loss = max_logits.mean(dim=-1)
-    elif loss_type == "ce":
-        loss = torch.nn.functional.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),
-            shift_labels.view(-1),
-            reduction="none",
-        )
-        loss = loss.view(shift_logits.shape[0], -1).mean(dim=-1)
+    elif loss_type == "smallmax_first_token":
+        max_logits = shift_logits.max(dim=-1).values # (B, T, D) -> (B, T)
+        loss = max_logits[:, 0] # (B, T) -> (B,)
+    elif loss_type == "smallmax_prob":
+        probs = torch.nn.functional.softmax(shift_logits, dim=-1)
+        max_logits = probs.max(dim=-1).values
+        loss = max_logits.mean(dim=-1)
+    elif loss_type == "smallmax_prob_first_token":
+        probs = torch.nn.functional.softmax(shift_logits[:, 0, :], dim=-1) # (B, T, D) -> (B, D)
+        loss = probs.max(dim=-1).values # (B, D) -> (B,)
     else:
         raise NotImplementedError(f"Loss function {loss_type} not implemented")
 

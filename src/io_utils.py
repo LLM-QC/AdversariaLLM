@@ -194,10 +194,16 @@ class CompactJSONEncoder(json.JSONEncoder):
         if isinstance(o, list):
             if all(isinstance(el, str) for el in o) and len(str(o)) > 200:
                 return False
+
+        # we allow lists of ints to be printed on a single line, no matter how long,
+        # otherwise containers are put on multiple lines if they are too long.
+        # Usually ints are mainly used for token ids, which become very long for some prompts.
         return (
             self._primitives_only(o)
-            and len(o) <= self.MAX_ITEMS
-            and len(str(o)) - 2 <= self.MAX_WIDTH
+            and (
+                all(isinstance(el, int) for el in o)
+                or (len(o) <= self.MAX_ITEMS and len(str(o)) - 2 <= self.MAX_WIDTH)
+            )
         )
 
     def _primitives_only(self, o: list | tuple | dict):
@@ -283,10 +289,15 @@ def log_config_to_db(run_config, result, log_file):
             "log_file": log_file,
             "scored_by": []
         }
-        collection.insert_one(config_data)
+        # If a run with the same config already exists, replace it
+        collection.replace_one(
+            {"config": config_data["config"]},
+            config_data,
+            upsert=True
+        )
 
 
-def filter_config(run_config: RunConfig, dset_len: int) -> bool:
+def filter_config(run_config: RunConfig, dset_len: int, overwrite: bool = False) -> bool:
     db = get_mongodb_connection()
     collection = db.runs
 
@@ -306,7 +317,7 @@ def filter_config(run_config: RunConfig, dset_len: int) -> bool:
     for i in idx:
         run_config.dataset_params.idx = i
         config_data = OmegaConf.to_container(OmegaConf.structured(run_config), resolve=True)
-        if collection.find_one({"config": config_data}):
+        if not overwrite and collection.find_one({"config": config_data}):
             print(f"Skipping {run_config.model} {run_config.dataset} {run_config.attack} idx={i} because it already exists")
             continue
         filtered_idx.append(i)
@@ -315,3 +326,13 @@ def filter_config(run_config: RunConfig, dset_len: int) -> bool:
         return None
     run_config.dataset_params.idx = filtered_idx
     return run_config
+
+
+def delete_orphaned_runs():
+    db = get_mongodb_connection()
+    items = db.runs.find()
+    for item in items:
+        log_file = item["log_file"]
+        if not os.path.exists(log_file):
+            print(f"Log file not found: {log_file}, deleting from database")
+            db.runs.delete_one({"_id": item["_id"]})
