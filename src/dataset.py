@@ -50,11 +50,12 @@ class PromptDataset(torch.utils.data.Dataset):
         if isinstance(config_idx, int):
             idx = idx[config_idx : config_idx + 1]
         elif isinstance(config_idx, Sequence):
+            logging.info(f"Selecting indices: {config_idx}")
             idx = idx[config_idx]
         elif config_idx is not None:
             raise ValueError(f"Invalid idx: {config.idx}")
 
-        return idx
+        return idx, config_idx
 
     @classmethod
     def from_name(cls, name):
@@ -105,11 +106,11 @@ class AdvBehaviorsDataset(PromptDataset):
         self.targets = self.messages[self.messages.columns[-1]].map(targets)
         assert len(self.messages) == len(self.targets), "Mismatched lengths"
 
-        idx = self._select_idx(config, len(self.messages))
+        self.idx, self.config_idx = self._select_idx(config, len(self.messages))
 
         # cut
-        self.messages = self.messages.iloc[idx].reset_index(drop=True)
-        self.targets = self.targets.iloc[idx].reset_index(drop=True)
+        self.messages = self.messages.iloc[self.idx].reset_index(drop=True)
+        self.targets = self.targets.iloc[self.idx].reset_index(drop=True)
 
     def __len__(self):
         return len(self.messages)
@@ -146,10 +147,10 @@ class RefusalDirectionDataDataset(PromptDataset):
         with open(os.path.join(config.path, f"{config.type}_{config.split}.json"), "r") as f:
             self.messages = json.load(f)[: config.n_samples]
 
-        idx = self._select_idx(config, len(self.messages))
+        self.idx, self.config_idx = self._select_idx(config, len(self.messages))
 
         # Convert tensor indices to integers before using them
-        self.messages = [self.messages[int(i)]["instruction"] for i in idx]
+        self.messages = [self.messages[int(i)]["instruction"] for i in self.idx]
 
     def __len__(self):
         return len(self.messages)
@@ -174,10 +175,10 @@ class JBBBehaviorsDataset(PromptDataset):
         self.config = config
         dataset = jbb.read_dataset().as_dataframe()
 
-        idx = self._select_idx(config, len(dataset))
+        self.idx, self.config_idx = self._select_idx(config, len(dataset))
 
-        self.messages = dataset.Goal.iloc[idx].reset_index(drop=True)
-        self.targets = dataset.Target.iloc[idx].reset_index(drop=True)
+        self.messages = dataset.Goal.iloc[self.idx].reset_index(drop=True)
+        self.targets = dataset.Target.iloc[self.idx].reset_index(drop=True)
 
     def __len__(self):
         return len(self.messages)
@@ -254,9 +255,9 @@ class ORBenchDataset(PromptDataset):
         dataset = load_dataset("bench-llm/or-bench", "or-bench-hard-1k")["train"]
         dataset = [d["prompt"] for d in dataset]
 
-        idx = self._select_idx(config, len(dataset))
+        self.idx, self.config_idx = self._select_idx(config, len(dataset))
 
-        self.messages = [dataset[i] for i in idx]
+        self.messages = [dataset[i] for i in self.idx]
         self.targets = [""] * len(self.messages)
 
     def __len__(self):
@@ -284,9 +285,9 @@ class XSTestDataset(PromptDataset):
         dataset = load_dataset("walledai/XSTest")["test"]
         dataset = [d["prompt"] for d in dataset if d["label"] == "safe"]
 
-        idx = self._select_idx(config, len(dataset))
+        self.idx, self.config_idx = self._select_idx(config, len(dataset))
 
-        self.messages = [dataset[i] for i in idx]
+        self.messages = [dataset[i] for i in self.idx]
         self.targets = [""] * len(self.messages)
 
     def __len__(self):
@@ -306,9 +307,9 @@ class AlpacaDataset(PromptDataset):
         dataset = json.load(open(config.messages_path, "r"))
         dataset = [d["instruction"] for d in dataset]
 
-        idx = self._select_idx(config, len(dataset))
+        self.idx, self.config_idx = self._select_idx(config, len(dataset))
 
-        self.messages = [dataset[i] for i in idx]
+        self.messages = [dataset[i] for i in self.idx]
         self.targets = [""] * len(self.messages)
 
     def __len__(self):

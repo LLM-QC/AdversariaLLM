@@ -41,7 +41,9 @@ def run_attacks(cfg: DictConfig) -> None:
     all_run_configs = []
     for model_name, model_params in models_to_run:
         for dataset_name, dataset_params in datasets_to_run:
-            dset_len = len(PromptDataset.from_name(dataset_name)(dataset_params))
+            temp_dataset = PromptDataset.from_name(dataset_name)(dataset_params)
+            dset_len = len(temp_dataset)
+            dataset_params["idx"] = temp_dataset.config_idx
             for attack_name, attack_params in attacks_to_run:
                 run_config = RunConfig(
                     model_name,
