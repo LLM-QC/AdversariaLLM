@@ -20,7 +20,7 @@ torch.use_deterministic_algorithms(True, warn_only=True)  # determinism
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-def collect_run_paths(db, suffixes: list[str]|str, classifier: str) -> list[str]:
+def collect_run_paths(suffixes: list[str]|str, classifier: str) -> list[str]:
     """
     Collect paths to run files that have not been scored by the specified classifier.
 
@@ -59,7 +59,7 @@ def run_judge(cfg: DictConfig) -> None:
     logging.info("-------------------")
     logging.info(cfg)
 
-    paths = collect_run_paths(cfg.save_dir, cfg.suffixes, cfg.classifier)
+    paths = collect_run_paths(cfg.suffixes, cfg.classifier)
     logging.info(f"Found {len(paths)} paths")
     logging.info("Loading judge...")
     judge = Judge.from_name(cfg.classifier)
