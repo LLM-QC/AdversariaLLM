@@ -260,6 +260,7 @@ pgd_discrete:
   optimizer: "Adam"  # "Adam" or "SAM"
   projection: "simplex"  # "simplex" or "l2" or "l1"
   alpha: 0.001
+  restart_every: 100
   lr_scheduler:
     type: "constant"  # "constant" or "cosine"
     # constant
