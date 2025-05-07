@@ -1,4 +1,12 @@
-"""Single file implementation of the AutoDAN attack [https://arxiv.org/abs/2310.04451]"""
+"""Single file implementation of the AutoDAN attack [https://arxiv.org/abs/2310.04451]
+
+@article{liu2023autodan,
+  title={Autodan: Generating stealthy jailbreak prompts on aligned large language models},
+  author={Liu, Xiaogeng and Xu, Nan and Chen, Muhao and Xiao, Chaowei},
+  journal={arXiv preprint arXiv:2310.04451},
+  year={2023}
+}
+"""
 import logging
 import random
 import re

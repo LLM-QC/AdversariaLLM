@@ -1,4 +1,12 @@
-"""Single-file implementation of the AmpleGCG attack."""
+"""Single-file implementation of the AmpleGCG attack.
+
+@article{liao2024amplegcg,
+  title={Amplegcg: Learning a universal and transferable generative model of adversarial suffixes for jailbreaking both open and closed llms},
+  author={Liao, Zeyi and Sun, Huan},
+  journal={arXiv preprint arXiv:2404.07921},
+  year={2024}
+}
+"""
 import logging
 import sys
 import time

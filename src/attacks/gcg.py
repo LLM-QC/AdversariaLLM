@@ -1,4 +1,12 @@
-"""Single-file implementation of the GCG attack.
+"""Single-file implementation of the GCG attack with additional options.
+
+@article{zou2023universal,
+  title={Universal and transferable adversarial attacks on aligned language models},
+  author={Zou, Andy and Wang, Zifan and Carlini, Nicholas and Nasr, Milad and Kolter, J Zico and Fredrikson, Matt},
+  journal={arXiv preprint arXiv:2307.15043},
+  year={2023}
+}
+
 Extensively tested against a variety of models, including:
     cais/zephyr_7b_r2d2
     ContinuousAT/Llama-2-7B-CAT
@@ -14,7 +22,8 @@ Extensively tested against a variety of models, including:
     mistralai/Mistral-7B-Instruct-v0.3
     qwen/Qwen2-7B-Instruct
 
-Fixes several issues in nanoGCG, mostly re. Llama-2 & tokenization
+The implementation is inspired by nanoGCG, but fixes several issues in nanoGCG,
+mostly related to tokenization.
 """
 import gc
 import logging

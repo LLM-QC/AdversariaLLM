@@ -150,7 +150,6 @@ def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | No
     else:
         outputs = [item for sublist in outputs for item in sublist]
         assert len(outputs) == input_length
-
     return outputs
 
 
@@ -168,7 +167,7 @@ def generate_ragged(
     top_p: float = 1.0,
     top_k: int = 0,
     num_return_sequences: int = 1,
-) -> list[list[str]] | torch.Tensor:
+) -> list[list[str]] | list[list[torch.Tensor]]:
     """
     Generate completions for multiple prompts in a single batch.
     No KV-cache for left-padding yet.
@@ -208,6 +207,7 @@ def generate_ragged(
         max_new_tokens: The maximum number of tokens to generate for each prompt. If -1, generate until EOS token.
     Returns:
         A list of completions for each prompt.
+        If return_tokens is True, return a list of lists of tokens.
     """
     if (embedding_list is None) == (token_list is None):
         raise ValueError("One of embedding_list or token_list must be provided.")
@@ -222,8 +222,8 @@ def generate_ragged(
         ]
     assert embedding_list is not None
     # TODO: Implement KV-caching for Gemma
-    if use_cache and "gemma-2" in model.name_or_path:
-        logging.warning("KV-cache not implemented for Gemma 2. Disabling cache.")
+    if use_cache and "gemma-2" in model.name_or_path or "gemma-3" in model.config.name_or_path:
+        logging.warning("KV-cache not implemented for Gemma. Disabling cache.")
         use_cache = False
 
     B = len(embedding_list)
@@ -375,7 +375,17 @@ def generate_ragged(
 
     all_tokens = torch.stack(all_tokens, dim=1)  # (B, N, T)
     if return_tokens:
-        return all_tokens
+        B, N, T = all_tokens.size()
+        eos_id = tokenizer.eos_token_id
+        tokens = []
+        for i in range(B):
+            current_tokens = []
+            for j in range(N):
+                stop_idx = (all_tokens[i, j] == eos_id).nonzero()
+                stop_idx = stop_idx[0].item() if stop_idx.numel() > 0 else T
+                current_tokens.append(all_tokens[i, j, :stop_idx])
+            tokens.append(current_tokens)
+        return tokens
     completion = [tokenizer.batch_decode(all_tokens[i], skip_special_tokens=False) for i in range(B)]
     completion = [[c.split(tokenizer.eos_token)[0] for c in completion[i]] for i in range(B)]
     return completion
