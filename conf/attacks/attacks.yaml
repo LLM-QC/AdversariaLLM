@@ -12,7 +12,7 @@ actor:
   name: actor
   type: discrete
   placement: multi-turn
-  seed: 0
+  seed: ${attacks._default.seed}
   generation_config: ${attacks._default.generation_config}
   version: 0.0.4
   attack_model:
