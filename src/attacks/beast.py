@@ -1,6 +1,13 @@
 """Implementation of the BEAST attack.
 
-Adapted from https://github.com/dreadnode/research/blob/main/notebooks/Mistral%20-%20BEAST%20Beam%20Attack.ipynb
+@article{sadasivan2024fast,
+  title={Fast adversarial attacks on language models in one gpu minute},
+  author={Sadasivan, Vinu Sankar and Saha, Shoumik and Sriramanan, Gaurang and Kattakinda, Priyatham and Chegini, Atoosa and Feizi, Soheil},
+  journal={arXiv preprint arXiv:2402.15570},
+  year={2024}
+}
+
+Implementation adapted from https://github.com/dreadnode/research/blob/main/notebooks/Mistral%20-%20BEAST%20Beam%20Attack.ipynb
 """
 
 import time

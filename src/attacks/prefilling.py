@@ -1,7 +1,6 @@
-"""Baseline, just prompts the original prompt."""
+"""We simply fill the beginning of the model response with an affirmative suffix."""
 
 import time
-from typing import Optional
 from dataclasses import dataclass, field
 
 import torch
