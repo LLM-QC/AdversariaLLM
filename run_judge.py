@@ -83,9 +83,12 @@ def run_judge(cfg: DictConfig) -> None:
                     for step in subrun["steps"]:
                         completions: list = step["model_completions"]
                         for completion in completions:
-                            modfied_prompt = copy.deepcopy(prompt)
-                            modfied_prompt[-1]["content"] += completion
-                            modified_prompts.append(modfied_prompt)
+                            modified_prompt = copy.deepcopy(prompt)
+                            if modified_prompt[-1]["role"] == "assistant":
+                                modified_prompt[-1]["content"] += completion
+                            else:
+                                modified_prompt.append({"role": "assistant", "content": completion})
+                            modified_prompts.append(modified_prompt)
                     pbar.set_description(f"{len(modified_prompts)} | {n} total")
                     results = judge(modified_prompts)
                     if all(r is None for r in results):
