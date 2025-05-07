@@ -9,7 +9,7 @@ import sys
 import filelock
 import hydra
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, ListConfig
 from tqdm import tqdm
 
 from src.errors import print_exceptions
@@ -20,7 +20,7 @@ torch.use_deterministic_algorithms(True, warn_only=True)  # determinism
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-def collect_run_paths(db, suffixes: list[str]|str, classifier: str) -> list[str]:
+def collect_run_paths(suffixes: list[str]|str, classifier: str) -> list[str]:
     """
     Collect paths to run files that have not been scored by the specified classifier.
 
@@ -32,7 +32,7 @@ def collect_run_paths(db, suffixes: list[str]|str, classifier: str) -> list[str]
     Returns:
         List of paths to run files
     """
-    if not isinstance(suffixes, list):
+    if not isinstance(suffixes, (list, ListConfig)):
         suffixes = [str(suffixes)]
     delete_orphaned_runs()
     db = get_mongodb_connection()
@@ -48,6 +48,8 @@ def collect_run_paths(db, suffixes: list[str]|str, classifier: str) -> list[str]
             continue
         if any(date_time_string.endswith(suffix) for suffix in suffixes):
             paths.append(log_file)
+    # remove duplicates
+    paths = list(set(paths))
     return sorted(paths, reverse=True)
 
 
@@ -59,7 +61,7 @@ def run_judge(cfg: DictConfig) -> None:
     logging.info("-------------------")
     logging.info(cfg)
 
-    paths = collect_run_paths(cfg.save_dir, cfg.suffixes, cfg.classifier)
+    paths = collect_run_paths(cfg.suffixes, cfg.classifier)
     logging.info(f"Found {len(paths)} paths")
     logging.info("Loading judge...")
     judge = Judge.from_name(cfg.classifier)
@@ -79,9 +81,12 @@ def run_judge(cfg: DictConfig) -> None:
                     for step in subrun["steps"]:
                         completions: list = step["model_completions"]
                         for completion in completions:
-                            modfied_prompt = copy.deepcopy(prompt)
-                            modfied_prompt[-1]["content"] += completion
-                            modified_prompts.append(modfied_prompt)
+                            modified_prompt = copy.deepcopy(prompt)
+                            if modified_prompt[-1]["role"] == "assistant":
+                                modified_prompt[-1]["content"] += completion
+                            else:
+                                modified_prompt.append({"role": "assistant", "content": completion})
+                            modified_prompts.append(modified_prompt)
                     pbar.set_description(f"{len(modified_prompts)} | {n} total")
                     results = judge(modified_prompts)
                     if all(r is None for r in results):
@@ -95,7 +100,7 @@ def run_judge(cfg: DictConfig) -> None:
                 json.dump(run, open(path, "w"), indent=4)
                 db = get_mongodb_connection()
                 collection = db.runs
-                collection.update_one({"log_file": path}, {"$addToSet": {"scored_by": cfg.classifier}})
+                collection.update_many({"log_file": path}, {"$addToSet": {"scored_by": cfg.classifier}})
             except Exception as e:
                 print(path, str(e))
                 os.remove(path + ".lock")
