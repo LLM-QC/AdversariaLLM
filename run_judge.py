@@ -9,7 +9,7 @@ import sys
 import filelock
 import hydra
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, ListConfig
 from tqdm import tqdm
 
 from src.errors import print_exceptions
@@ -32,7 +32,7 @@ def collect_run_paths(suffixes: list[str]|str, classifier: str) -> list[str]:
     Returns:
         List of paths to run files
     """
-    if not isinstance(suffixes, list):
+    if not isinstance(suffixes, (list, ListConfig)):
         suffixes = [str(suffixes)]
     delete_orphaned_runs()
     db = get_mongodb_connection()
@@ -48,6 +48,8 @@ def collect_run_paths(suffixes: list[str]|str, classifier: str) -> list[str]:
             continue
         if any(date_time_string.endswith(suffix) for suffix in suffixes):
             paths.append(log_file)
+    # remove duplicates
+    paths = list(set(paths))
     return sorted(paths, reverse=True)
 
 
