@@ -88,6 +88,8 @@ def load_model_and_tokenizer(model_params):
             tokenizer.model_max_length = 32768
         case path if "gemma-2" in path:
             tokenizer.model_max_length = 8192
+        case path if "gemma-3" in path:
+            tokenizer.model_max_length = 32768  # true ctx is 128k but we dont have that much memory
         case path if 'zephyr' in path:
             tokenizer.model_max_length = 32768
     if tokenizer.model_max_length > 262144:

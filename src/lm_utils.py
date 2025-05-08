@@ -313,8 +313,9 @@ def generate_ragged(
                 if not is_gemma:
                     past_key_values = DynamicCache()
                 else:
+                    config = model.config if hasattr(model.config, "cache_implementation") else model.config.text_config
                     past_key_values = HybridCache(
-                        config=model.config,
+                        config=config,
                         max_batch_size=B,
                         max_cache_len=next_token_idx.max().item() + max_new_tokens,
                         device=model.device,
