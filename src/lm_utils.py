@@ -374,7 +374,7 @@ def generate_ragged(
             else:
                 for i in range(max_new_tokens):
                     outputs = model(inputs_embeds=padded_embeddings[:, : next_token_idx.max()])
-                    logits = outputs.logits[:, next_token_idx - 1]
+                    logits = outputs.logits[torch.arange(B), next_token_idx - 1]
                     next_tokens = sample_next_token(logits)
                     padded_embeddings[idx_range, next_token_idx] = (
                         model.get_input_embeddings()(next_tokens)
