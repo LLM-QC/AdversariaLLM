@@ -371,7 +371,7 @@ def generate_ragged(
                     # since we only add a single step at a time
                     finished_at_this_step = torch.zeros_like(finished)
                     finished_at_this_step[generating] = torch.isin(next_tokens[generating], stop_token_ids) | (lengths[generating] + 1 == max_new_tokens)
-                    still_active = (~finished & ~finished_at_this_step)[~finished]
+                    still_active = (~finished & ~finished_at_this_step)[~finished].cpu()
 
                     for j in range(len(past_key_values.key_cache)):
                         if not is_gemma:

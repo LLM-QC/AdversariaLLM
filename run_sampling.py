@@ -20,19 +20,22 @@ from dataclasses import dataclass
 from datetime import datetime
 
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # determinism
+import copy
 import logging
+import sys
 
 import hydra
 import torch
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
-import sys
+from vllm import LLM, SamplingParams, TokensPrompt
+
 from src.dataset import json
 from src.errors import print_exceptions
-from src.io_utils import load_model_and_tokenizer, get_filtered_and_grouped_paths, get_mongodb_connection, CompactJSONEncoder, free_vram
-from src.lm_utils import generate_ragged_batched
+from src.io_utils import (CompactJSONEncoder, free_vram, get_filtered_and_grouped_paths,
+                          get_mongodb_connection, load_model_and_tokenizer)
 from src.judges import Judge
-import copy
+from src.lm_utils import generate_ragged_batched
 
 torch.use_deterministic_algorithms(True, warn_only=True)
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -64,6 +67,36 @@ def eval_list_expressions_in_dict(d):
     return d
 
 
+def generate_ragged_batched_vllm(
+    model,
+    tokenizer,
+    token_list,
+    initial_batch_size,
+    num_return_sequences,
+    max_new_tokens,
+    temperature,
+    top_p,
+    top_k
+) :
+    sampling_params = SamplingParams(
+        n=num_return_sequences,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k if top_k != 0 else -1,
+        max_tokens=max_new_tokens,
+        skip_special_tokens=False
+    )
+    prompts = [TokensPrompt(prompt_token_ids=tokens.tolist()) for tokens in token_list]
+    generations = model.generate(prompts=prompts, sampling_params=sampling_params)
+    out = []
+    for generation in generations:
+        instance = []
+        for output in generation.outputs:
+            instance.append(output.text)
+        out.append(instance)
+    return out # (n_steps, n_to_generate)
+
+
 @hydra.main(config_path="./conf", config_name="sampling", version_base="1.3")
 @print_exceptions
 def main(cfg: DictConfig) -> None:
@@ -79,6 +112,11 @@ def main(cfg: DictConfig) -> None:
     paths = get_filtered_and_grouped_paths(filter_by, None)[("all", )]
     n = 0
     pbar = tqdm(paths, file=sys.stdout)
+    backend = "hf"
+    gen_function = {
+        "vllm": generate_ragged_batched_vllm,
+        "hf": generate_ragged_batched
+    }
 
     model, tokenizer, judge, last_judge, last_model_params = None, None, None, None, None
     for path in pbar:
@@ -99,7 +137,15 @@ def main(cfg: DictConfig) -> None:
                 last_model_params = model_params
                 del model, tokenizer
                 free_vram()
-                model, tokenizer = load_model_and_tokenizer(model_params)
+                try:
+                    raise Exception("test")
+                    # need to leave space for judging
+                    model, tokenizer = (LLM(model=model_params.id, gpu_memory_utilization=0.8), None)
+                    backend = "vllm"
+                except Exception as e:
+                    model, tokenizer = load_model_and_tokenizer(model_params)
+                    backend = "hf"
+
             # lets generate however many new ones we need
             for subrun in attack_run["runs"]:
                 tokens = []
@@ -109,10 +155,11 @@ def main(cfg: DictConfig) -> None:
                     classifiers.update(list(step["scores"].keys()))
                 logging.info(f"Generating {len(subrun['steps'])}x{n_to_generate} completions.")
 
-                additional_completions = generate_ragged_batched(
+                additional_completions = gen_function[backend](
                     model,
                     tokenizer,
                     tokens,
+                    initial_batch_size=len(tokens),
                     num_return_sequences=n_to_generate,
                     max_new_tokens=gen_config["max_new_tokens"],
                     temperature=gen_config["temperature"],
@@ -128,6 +175,7 @@ def main(cfg: DictConfig) -> None:
                         del judge
                         free_vram()
                         judge = Judge.from_name(classifier)
+                        print(judge.classifier.device)
                     modified_prompts = []
                     for completions in additional_completions:
                         for completion in completions:

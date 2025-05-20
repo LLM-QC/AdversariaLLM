@@ -56,6 +56,7 @@ class AutoDANConfig:
     placement: str = "prefix"
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     num_steps: int = 100
+    early_stopping_threshold: int = 10
     seed: int = 0
     batch_size: int = 128
     eval_steps: int = 5
@@ -100,7 +101,7 @@ class AutoDANAttack(Attack):
 
             # ==== Early stopping vars =====
             previous_loss = None
-            early_stopping_threshold = 10
+            early_stopping_threshold = self.config.early_stopping_threshold
 
             # ===== init target embeds =====
             batch_attacks = []
@@ -139,10 +140,10 @@ class AutoDANAttack(Attack):
                 # ====== Checking for early stopping if loss stuck at local minima ======
                 if previous_loss is None or current_loss < previous_loss:
                     previous_loss = current_loss
-                    early_stopping_threshold = 10
+                    early_stopping_threshold = self.config.early_stopping_threshold
                 else:
                     early_stopping_threshold -= 1
-                    if early_stopping_threshold <= 0:
+                    if early_stopping_threshold == 0:
                         break
                 optim_strings = self.sample_control(
                     control_prefixes=optim_strings[: self.config.batch_size],

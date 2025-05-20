@@ -71,6 +71,7 @@ autodan:
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
   num_steps: 100
+  early_stopping_threshold: 0
   batch_size: 128
   eval_steps: 5
   num_elites: 0.05
@@ -289,3 +290,30 @@ random_search:
   candidates_per_generation: 8
   optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
   generation_config: ${attacks._default.generation_config}
+reinforce:
+  name: reinforce
+  type: discrete
+  version: 0.0.1
+  generation_config: ${attacks._default.generation_config}
+  seed: ${attacks._default.seed}
+  num_steps: 100
+  batch_size: 512
+  optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
+  search_width: 512
+  topk: 256
+  n_replace: 1
+  buffer_size: 0
+  judge_model: strong_reject
+  loss: ce
+  use_constrained_gradient: False
+  mellowmax_alpha: 1.0
+  early_stop: False
+  use_prefix_cache: True
+  allow_non_ascii: False
+  allow_special: False
+  filter_ids: True
+  verbosity: WARNING
+  token_selection: default
+  grow_target: False
+  grad_smoothing: 1
+  grad_momentum: 0.0   # 0.5 works quite well
