@@ -97,6 +97,10 @@ class Attack(Generic[AttRes]):
                 from .beast import BEASTAttack
 
                 return BEASTAttack
+            case "bon":
+                from .bon import BonAttack
+
+                return BonAttack
             case "direct":
                 from .direct import DirectAttack
 

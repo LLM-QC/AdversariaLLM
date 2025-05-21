@@ -101,6 +101,17 @@ beast:
   allow_non_ascii: True
   allow_special: False
   use_prefix_cache: True
+bon:
+  name: bon
+  type: discrete
+  version: 0.0.1
+  generation_config: ${attacks._default.generation_config}
+  seed: ${attacks._default.seed}
+  num_steps: 1000
+  sigma: 0.4
+  word_scrambling: true
+  random_capitalization: true
+  ascii_perturbation: true
 direct:
   name: direct
   type: discrete
