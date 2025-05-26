@@ -151,6 +151,7 @@ class HumanJailbreaksAttack(Attack):
                     step=j,
                     model_input=attack_prompt,
                     model_completions=model_completions,
+                    flops=0,
                     time_taken=time_per_step,
                     loss=loss,
                     model_input_tokens=model_input_tokens,

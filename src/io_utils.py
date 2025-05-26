@@ -4,6 +4,7 @@ import logging
 import os
 from collections import defaultdict
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 
 import orjson
 import torch
@@ -499,7 +500,7 @@ def _gather(value, prefix: tuple[str], out):
                 _gather(v, prefix, out)               # sub-lists of dicts
 
 
-def collect_results(paths) -> dict[tuple[str], dict[str, list[float]]]:
+def collect_results(paths, infer_sampling_flops=False) -> dict[tuple[str], dict[str, list[float]]]:
     """
     Loads JSONs corresponding to a list of paths from disk.
 
@@ -508,6 +509,8 @@ def collect_results(paths) -> dict[tuple[str], dict[str, list[float]]]:
     paths : dict
         A dictionary where keys are group identifiers (tuples of strings)
         and values are lists of log paths.
+    infer_sampling_flops : bool
+        If True, the number of FLOPS for sampling is inferred from the model parameters and the max_new_tokens.
 
     Returns
     -------
@@ -523,6 +526,10 @@ def collect_results(paths) -> dict[tuple[str], dict[str, list[float]]]:
             for run in results["runs"]:
                 collected_metrics = defaultdict(list)
                 for step in run["steps"]:
+                    if infer_sampling_flops:
+                        max_new_tokens = results["config"]["attack_params"]["generation_config"]["max_new_tokens"]
+                        model_params = num_model_params(results["config"]["model_params"]["id"])
+                        step["flops_sampling"] = model_params * (max_new_tokens + len(step["model_input_tokens"])) * 2
                     for metric in step.keys():
                         # this will fill collected_metrics with values from step[metric]
                         # and handles nested containers
@@ -545,3 +552,9 @@ def cached_json_load(path):
     data = orjson.loads(open(path, "rb").read())
     JSON_CACHE[path] = (mod_time, data)
     return data
+
+
+@lru_cache(maxsize=None)
+def num_model_params(id: str) -> int:
+    model = AutoModelForCausalLM.from_pretrained(id, device_map="cpu")
+    return model.num_parameters(exclude_embeddings=True)

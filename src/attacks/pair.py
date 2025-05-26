@@ -17,7 +17,7 @@ import re
 from src.attacks import (Attack, AttackResult, AttackStepResult,
                          GenerationConfig, SingleAttackRunResult)
 from src.io_utils import load_model_and_tokenizer
-from src.lm_utils import generate_ragged_batched, prepare_conversation
+from src.lm_utils import generate_ragged_batched, prepare_conversation, get_flops
 from src.types import Conversation
 
 
@@ -121,11 +121,13 @@ class PAIRAttack(Attack):
         completions: list[list[str]] = []
         times = []
         token_list: list[list[int]] = []
+        flops_list: list[int] = []
+        flops_judge = 0
         # Begin PAIR
         t1 = time.time()
         for _ in trange(self.config.num_steps):
             # Get adversarial prompts and improvement
-            extracted_attack_list = attack_lm.get_attack(
+            extracted_attack_list, flops_attack = attack_lm.get_attack(
                 convs_list, processed_response_list
             )
             if any([attack is None for attack in extracted_attack_list]):
@@ -140,13 +142,15 @@ class PAIRAttack(Attack):
             # Get target responses
             times.append(time.time() - t1)
             t1 = time.time()
-            target_response_list, model_input_tokens = target_lm.get_response(adv_prompt_list)
+            target_response_list, model_input_tokens, flops_target = target_lm.get_response(adv_prompt_list)
+
             token_list.extend(model_input_tokens)
             completions.append(target_response_list)
+            flops_list.append(flops_attack + flops_target + flops_judge)
             logging.info("Finished getting target responses.")
 
             # Get judge scores
-            judge_scores = judge_lm.score(adv_prompt_list, target_response_list)
+            judge_scores, flops_judge = judge_lm.score(adv_prompt_list, target_response_list)
             logging.info(f"Judge scores: {judge_scores}")
             processed_response_list = [
                 process_target_response(target_response, score, conversation[0]["content"])
@@ -172,6 +176,7 @@ class PAIRAttack(Attack):
                 model_completions=completions[i],
                 time_taken=times[i],
                 loss=None,
+                flops=flops_list[i],
                 model_input=attacks[i],
                 model_input_tokens=token_list[i].tolist(),
             )
@@ -258,7 +263,7 @@ class AttackLM:
         self.max_attempts = cfg.max_attempts
         self.top_p = cfg.top_p
 
-    def get_attack(self, convs_list: list[Conversation], prompts_list: list[str]):
+    def get_attack(self, convs_list: list[Conversation], prompts_list: list[str]) -> tuple[list[dict], int]:
         """
         Generates responses for a batch of conversations and prompts using a language model.
         Only valid outputs in proper JSON format are returned. If an output isn't generated
@@ -304,6 +309,7 @@ class AttackLM:
             full_tokens.append(tokens)
 
         indices_to_regenerate = list(range(len(convs_list)))
+        flops = 0
         for _ in range(self.max_attempts):
             # Subset conversations based on indices to regenerate
             # Generate outputs
@@ -315,8 +321,10 @@ class AttackLM:
                 max_new_tokens=self.max_new_tokens,
                 temperature=self.temperature,
                 top_p=self.top_p,
+                return_tokens=True,
             )
-            outputs_list = [o[0] for o in outputs_list]  # only care about a single completion
+            flops = get_flops(self.model, sum(len(t) for t in token_list), sum(len(o[0]) for o in outputs_list), type="forward")
+            outputs_list = [tokenizer.decode(o[0]) for o in outputs_list]  # only care about a single completion
             # Check for valid outputs and update the list
             new_indices_to_regenerate = []
             for i, full_output in enumerate(outputs_list):
@@ -341,7 +349,7 @@ class AttackLM:
             logging.info(
                 f"Failed to generate output after {self.max_attempts} attempts. Terminating."
             )
-        return valid_outputs
+        return valid_outputs, flops
 
 
 class TargetLM:
@@ -363,7 +371,7 @@ class TargetLM:
         self.max_new_tokens = cfg.max_new_tokens
         self.top_p = cfg.top_p
 
-    def get_response(self, conversations: list[Conversation]) -> tuple[list[str], list[list[int]]]:
+    def get_response(self, conversations: list[Conversation]) -> tuple[list[str], list[list[int]], int]:
         token_list = []
         for conversation in conversations:
             token_list.append(torch.cat(prepare_conversation(self.tokenizer, conversation)[0][:-1]))
@@ -375,9 +383,12 @@ class TargetLM:
             max_new_tokens=self.max_new_tokens,
             temperature=self.temperature,
             top_p=self.top_p,
+            return_tokens=True,
         )
-        outputs_list = [o[0] for o in outputs_list]  # only care about a single completion
-        return outputs_list, token_list
+        outputs_list = [self.tokenizer.decode(o[0]) for o in outputs_list]  # only care about a single completion
+        flops = get_flops(self.model, sum(len(t) for t in token_list), sum(len(o[0]) for o in outputs_list), type="forward")
+
+        return outputs_list, token_list, flops
 
 
 class JudgeLM:
@@ -411,7 +422,7 @@ class JudgeLM:
 
         return output
 
-    def score(self, prompt_list, response_list):
+    def score(self, prompt_list, response_list) -> tuple[list[int], int]:
         # Construct judge prompts
         judge_prompts = [self.get_judge_prompt(p, r) for p, r in zip(prompt_list, response_list)]
         # Prepare conversations for the judge model
@@ -431,11 +442,13 @@ class JudgeLM:
             tokenizer=self.tokenizer,
             token_list=token_list,
             max_new_tokens=self.max_new_tokens,
+            return_tokens=True,
         )
-        outputs_list = [o[0] for o in outputs_list]
+        outputs_list = [self.tokenizer.decode(o[0]) for o in outputs_list]
+        flops = get_flops(self.model, sum(len(t) for t in token_list), sum(len(o[0]) for o in outputs_list), type="forward")
         # Extract scores
         scores = [self.process_output(output) for output in outputs_list]
-        return scores
+        return scores, flops
 
 
 def process_target_response(target_response, score, goal):
