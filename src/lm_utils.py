@@ -25,6 +25,7 @@ def generate_ragged_batched(
     initial_batch_size: int = 256,
     use_cache: bool = True,
     verbose: bool = False,
+    num_return_sequences: int = 1,
     **kwargs,
 ) -> list[list[str]]:
     """
@@ -48,7 +49,12 @@ def generate_ragged_batched(
 
     # Shorter sequences will come first to maximize batch size
     sorted_indexed_inputs = sorted(list(enumerate(input_list)), key=lambda x: x[1].size(0))
-    sorted_input_list = [item for _, item in sorted_indexed_inputs]
+
+    # Duplicate each prompt for multiple return sequences here is faster because it
+    # avoids the slower for-loop in generate_ragged_batched. We can't easily move this
+    # inside generate_ragged directly because we need to do it outside of the
+    # with_max_batchsize context.
+    sorted_input_list = [it for _, item in sorted_indexed_inputs for it in [item] * num_return_sequences]
     original_indices = [index for index, _ in sorted_indexed_inputs]
 
     def func(chunk):
@@ -59,6 +65,7 @@ def generate_ragged_batched(
             token_list=chunk if input_type == "tokens" else None,
             embedding_list=chunk if input_type == "embeddings" else None,
             use_cache=use_cache,
+            num_return_sequences=1,
             **kwargs,
         )
     sorted_outputs = with_max_batchsize(func, sorted_input_list, initial_batch_size=initial_batch_size, verbose=verbose)
@@ -66,7 +73,7 @@ def generate_ragged_batched(
     # Unsort the outputs to match the original input order
     outputs = [None] * len(input_list)
     for i, original_index in enumerate(original_indices):
-        outputs[original_index] = sorted_outputs[i]
+        outputs[original_index] = [sorted_outputs[i*num_return_sequences + j][0] for j in range(num_return_sequences)]
     return outputs
 
 
