@@ -82,37 +82,6 @@ PADDING_CASES = [
 
 
 # ═════════════════════════════════════════════════════════════════════
-#  Tiny JSON-schema key/type checker
-# ═════════════════════════════════════════════════════════════════════
-def _assert_schema_keys(schema: dict, obj):
-    """Minimal recursive check – keys, required, primitives, array len."""
-    if schema["type"] == "object":
-        assert isinstance(obj, dict), "expected object"
-        req = schema.get("required", [])
-        for k in req:
-            assert k in obj, f"missing required key '{k}'"
-        allowed = set(schema.get("properties", {}))
-        assert set(obj).issubset(allowed), f"unexpected keys {set(obj) - allowed}"
-        for k, v in obj.items():
-            if k in allowed:
-                _assert_schema_keys(schema["properties"][k], v)
-
-    elif schema["type"] == "array":
-        assert isinstance(obj, list), "expected array"
-        mi, ma = schema.get("minItems", 0), schema.get("maxItems", float("inf"))
-        assert mi <= len(obj) <= ma, "array length out of bounds"
-        for item in obj:
-            _assert_schema_keys(schema["items"], item)
-
-    elif schema["type"] == "string":
-        assert isinstance(obj, str), "expected string"
-    elif schema["type"] == "integer":
-        assert isinstance(obj, int), "expected int"
-        if "maximum" in schema:
-            assert obj <= schema["maximum"], "integer exceeds maximum"
-
-
-# ═════════════════════════════════════════════════════════════════════
 #  Model loader util  (loads & caches per session)
 # ═════════════════════════════════════════════════════════════════════
 _model_cache: dict[str, tuple] = {}
@@ -134,7 +103,7 @@ def _get_model_tok(model_id: str):
 #  Core generation helper
 # ═════════════════════════════════════════════════════════════════════
 def _generate(model, tok, schema, padding_side, use_cache, prompt_suffix=""):
-    from src.lm_utils import generate_ragged, parse_json_response
+    from src.lm_utils import generate_ragged, _validate_json_string, _parse_json
 
     prompt = f"Return ONLY JSON that matches this schema:\n{json.dumps(schema)}\n{prompt_suffix}"
     ids = tok.encode(prompt, add_special_tokens=False)
@@ -149,11 +118,55 @@ def _generate(model, tok, schema, padding_side, use_cache, prompt_suffix=""):
         json_schema=schema,
     )[0][0]
     print(f"\n--- JSON output ---\n{out.strip()}")
-    frag = parse_json_response(out)
-    assert frag, "no balanced JSON in output"
-    obj = json.loads(frag)
-    _assert_schema_keys(schema, obj)
+    _validate_json_string(out, schema)
+    frag = _parse_json(out)
     return frag, out
+
+
+def test_parse_json():
+    from src.lm_utils import _parse_json
+
+    assert _parse_json('prefix {"a":1} suffix')['a'] == 1
+    assert _parse_json('{"b": 2, "note": "brace } in string"}')['b'] == 2
+    assert _parse_json('junk {"x": {"y": 3}} stuff')['x']['y'] == 3
+    assert _parse_json('first {"ok":1} second {broken') == {'ok': 1}
+    assert _parse_json('[{"name":"Ada","age":33}]')[0]['age'] == 33
+    assert _parse_json('pre [ {"n":1} , {"n":2} ] post')[1]['n'] == 2
+    assert _parse_json('no objects here') is None
+
+
+@pytest.mark.parametrize(
+    "sample",
+    [
+        '{"person":{"name":"Ada","age":33}}',
+        'noise {"person":{"name":"Bob","age":50,"skills":["C","Rust"]}} trailing',
+        '{"person":{"name":"Eve","age":120}}',
+        '```json\n{ "person": { "name":"Li", "age":22 } }\n```',
+    ],
+)
+def test_valid_samples(sample):
+    from src.lm_utils import _parse_json, _validate_json
+
+    SCHEMA = {
+        "type": "object",
+        "properties": {
+            "person": {
+                "type": "object",  # explicit, but could be omitted
+                "properties": {
+                    "name": {"type": "string"},
+                    "age": {"type": "integer", "maximum": 120},
+                    "skills": {  # optional array of strings
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["name", "age"],
+            }
+        },
+        "required": ["person"],
+    }
+    obj = _parse_json(sample)
+    _validate_json(SCHEMA, obj)  # should NOT raise
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -186,7 +199,7 @@ def test_mixed_batch(model_id):
     ]
     batch = [torch.tensor(tok.encode(p, add_special_tokens=False)) for p in prompts]
 
-    from src.lm_utils import generate_ragged, parse_json_response
+    from src.lm_utils import generate_ragged, validate_json_strings, _parse_json
 
     outs = generate_ragged(
         model=model,
@@ -201,9 +214,9 @@ def test_mixed_batch(model_id):
     for i, out in enumerate(outs):
         print(f"\nRow {i}: {out.strip()} ...\n")
 
+    validate_json_strings(outs, schema)
+
     print(f"\n--- Mixed batch for {model_id} ---")
     for i, out in enumerate(outs):
-        frag = parse_json_response(out) or "<NO JSON>"
+        frag = _parse_json(out) or "<NO JSON>"
         print(f"row {i}: {frag}")
-        assert frag != "<NO JSON>", f"row {i} produced no JSON"
-        _assert_schema_keys(schema, json.loads(frag))
