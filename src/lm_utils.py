@@ -4,7 +4,7 @@ import random
 import string
 import sys
 from functools import lru_cache
-from typing import Callable, Literal, Optional, Any, Mapping, Sequence, Iterator
+from typing import Any, Callable, Iterator, Literal, Mapping, Optional, Sequence
 
 import json5
 import torch
@@ -13,8 +13,9 @@ from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 from transformers import DynamicCache, HybridCache, PreTrainedModel, PreTrainedTokenizerBase
 
-from src.types import Conversation, JsonSchema
 from src.io_utils import free_vram
+from src.types import Conversation, JsonSchema
+
 
 @torch.no_grad()
 def generate_ragged_batched(
@@ -1172,6 +1173,7 @@ def get_flops(model: PreTrainedModel, n_tokens_in: int, n_tokens_out: int, type:
     else:
         raise ValueError(f"Invalid type: {type}")
 
+
 class NullFilter:  # <- used when json_schema=None
     def step(
         self,
@@ -1226,7 +1228,7 @@ class JSONFilter:
     def step(self, prev_tokens: torch.LongTensor, logits: torch.Tensor) -> torch.Tensor:
         B, V = logits.shape
 
-        # ① update histories + whitespace state from *previous* step
+        # 1 update histories + whitespace state from *previous* step
         for i in range(B):
             tid = prev_tokens[i].item()
             if tid == self.PAD:
@@ -1240,7 +1242,7 @@ class JSONFilter:
                 self.streak[i] = 0
                 self.seen_real[i] = True
 
-        # ② build masked logits
+        # 2 build masked logits
         masked = torch.full_like(logits, float("-inf"))
 
         for i, enf in enumerate(self.enforcers):
@@ -1418,12 +1420,12 @@ def _parse_json(output: str) -> Optional[Any]:
         try:
             return json5.loads(block)
         except Exception as e:
-            print("Failed to parse JSON candidate:", block)
-            print("Error:", e)
-            print("Continuing to search for valid JSON candidates...")
+            logging.info("Failed to parse JSON candidate:", block)
+            logging.info("Error:", e)
+            logging.info("Continuing to search for valid JSON candidates...")
             #     # skip to next candidate
             continue
 
-    print("No valid JSON object found in the output.")
+    logging.info("No valid JSON object found in the output.")
 
     return None  # no valid JSON found
