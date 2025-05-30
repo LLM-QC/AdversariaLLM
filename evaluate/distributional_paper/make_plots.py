@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import rankdata
 from scipy.interpolate import interp1d
-from matplotlib.colors import LogNorm
+from matplotlib.colors import LogNorm, PowerNorm
 
 
 pd.set_option("display.max_colwidth", None)
@@ -175,6 +175,7 @@ def pareto_plot(
 
 
     def subsample_and_aggregate(step_idx, sample_idx, cumulative, y, opt_flops, sampling_flops, rng):
+        n_runs, n_steps, n_total_samples = y.shape
         opt_flop = np.mean(opt_flops[:, :step_idx+1].sum(axis=1))
         sampling_flop = np.mean(sampling_flops[:, step_idx]) * sample_idx
         if cumulative and step_idx > 0:
@@ -203,12 +204,18 @@ def pareto_plot(
     else:
         x_interp = np.linspace(0, max_cost+1, n_x_points)
 
+    # Create figure with subplots: main plot + 2 bar charts
+    fig = plt.figure(figsize=(18, 6))
+
+    # Main Pareto plot (left half, spanning both rows)
+    ax1 = plt.subplot2grid((1, 4), (0, 0), colspan=2)
 
     # ---------- scatter all points ----------
-    plt.figure(figsize=(9, 6))
     if plot_points:
         if color_scale == "log":
             color_norm = LogNorm()
+        elif color_scale == "sqrt":
+            color_norm = PowerNorm(gamma=0.5)  # Square root normalization
         else:
             color_norm = None
         sc = plt.scatter(cost, mean_p, c=n_samp, cmap="viridis", alpha=0.15, s=3, norm=color_norm)
@@ -216,21 +223,27 @@ def pareto_plot(
     if threshold is None:
         plt.ylabel("Mean p_harmful", fontsize=14)
     else:
-        plt.ylabel(f"Mean ASR (threshold: {threshold})", fontsize=14)
+        plt.ylabel(f"Max ASR (threshold: {threshold})", fontsize=12)
 
     # ---------- overlay Pareto frontiers ----------
     cmap = plt.get_cmap("viridis")
     if color_scale == "log":
         norm = LogNorm(n_samp.min(), n_samp.max())
+    elif color_scale == "sqrt":
+        norm = PowerNorm(gamma=0.5, vmin=n_samp.min(), vmax=n_samp.max())
     else:
         norm = plt.Normalize(n_samp.min(), n_samp.max())
     rng = np.random.default_rng()
 
     n_smoothing = 50
+    frontier_data = {}  # Store frontier data for bar charts
+
     if plot_frontiers:
         for j in sample_levels_to_plot:
             xs = []
             ys = []
+            if j == n_total_samples:
+                n_smoothing = 1
             for _ in range(n_smoothing):
                 pts = []
                 for i in range(0, n_steps, 1):
@@ -248,6 +261,15 @@ def pareto_plot(
             y_mean = np.mean(y_interp, axis=0)
             # Filter out leading zeros
             nonzero_mask = y_mean > 0
+
+            # Store data for bar charts
+            frontier_data[j] = {
+                'x': x_interp[nonzero_mask],
+                'y': y_mean[nonzero_mask],
+                'color': color,
+                'max_asr': np.max(y_mean[nonzero_mask]) if np.any(nonzero_mask) else 0
+            }
+
             plt.plot(
                 x_interp[nonzero_mask],
                 y_mean[nonzero_mask],
@@ -259,7 +281,7 @@ def pareto_plot(
             )
 
     if plot_envelope:
-        n_smoothing = 50
+        n_smoothing = n_total_samples
         y_interps = []
         for j in range(1, n_total_samples+1):
             xs = []
@@ -290,60 +312,188 @@ def pareto_plot(
 
     title_suffix = ""
 
-    y = np.array(baseline[metric]) # (B, n_steps, n_samples)
-    if threshold is not None:
-        y = y > threshold
+    # Handle baseline data
+    baseline_max_asr = 0
+    baseline_frontier_data = None
 
-    baseline_flops_sampling = np.array(baseline["flops_sampling"])
-    if "flops" in baseline:
-        baseline_flops_optimization = np.array(baseline["flops"]) # (B, n_steps)
-    else:
-        baseline_flops_optimization = np.zeros_like(baseline_flops_sampling) # (B, n_steps)
-        if flops_per_step is not None:
-            baseline_flops_optimization += flops_per_step(np.arange(baseline_flops_optimization.shape[1]))
+    if baseline is not None:
+        y_baseline = np.array(baseline[metric]) # (B, n_steps, n_samples)
+        if threshold is not None:
+            y_baseline = y_baseline > threshold
 
-    if y is not None:
-        title_suffix = f" ({n_runs}, {y.shape[0]})"
-        if verbose:
-            print(n_runs, "for main")
-            print(y.shape[0], "for baseline")
-        n_runs, n_steps, n_total_samples = y.shape
-        assert n_total_samples == 1
+        baseline_flops_sampling = np.array(baseline["flops_sampling"])
+        if "flops" in baseline:
+            baseline_flops_optimization = np.array(baseline["flops"]) # (B, n_steps)
+        else:
+            baseline_flops_optimization = np.zeros_like(baseline_flops_sampling) # (B, n_steps)
+            if flops_per_step is not None:
+                baseline_flops_optimization += flops_per_step(np.arange(baseline_flops_optimization.shape[1]))
 
-        rng = np.random.default_rng()
-        pts = []  # (cost, step, n_samples, mean_p)
-        for i in range(0, n_steps, 1):
-            for j in range(1, n_total_samples + 1, 1):
-                pts.append(subsample_and_aggregate(i, j, cumulative, y, baseline_flops_optimization, baseline_flops_sampling, rng))
+        if y_baseline is not None:
+            title_suffix = f" ({n_runs}, {y_baseline.shape[0]})"
+            if verbose:
+                print(n_runs, "for main")
+                print(y_baseline.shape[0], "for baseline")
+            n_runs_baseline, n_steps_baseline, n_total_samples_baseline = y_baseline.shape
+            assert n_total_samples_baseline == 1
 
-        pts = np.asarray(pts)
-        cost, step_idx, n_samp, mean_p = pts.T
+            rng = np.random.default_rng()
+            pts = []  # (cost, step, n_samples, mean_p)
+            for i in range(0, n_steps_baseline, 1):
+                for j in range(1, n_total_samples_baseline + 1, 1):
+                    pts.append(subsample_and_aggregate(i, j, cumulative, y_baseline, baseline_flops_optimization, baseline_flops_sampling, rng))
 
-        # ---------- scatter all points ----------
-        # sc = plt.scatter(cost, mean_p, c="r", alpha=0.35, s=4)
+            pts = np.asarray(pts)
+            cost_baseline, step_idx_baseline, n_samp_baseline, mean_p_baseline = pts.T
 
-        # ---------- overlay Pareto frontiers ----------
-        if plot_frontiers or plot_envelope:
-            mask = n_samp == 1
-            fx, fy = _pareto_frontier(cost[mask], mean_p[mask], method=frontier_method)
-            y_interp = interp1d(fx, fy, kind="previous", bounds_error=False, fill_value=(0, max(fy)))(x_interp)
-            nonzero_mask = y_interp > 0
-            plt.plot(
-                x_interp[nonzero_mask],
-                y_interp[nonzero_mask],
-                marker="o",
-                linewidth=1.8,
-                markersize=2,
-                label=f"greedy",
-                color="r",
-            )
+            # ---------- overlay Pareto frontiers ----------
+            if plot_frontiers or plot_envelope:
+                mask = n_samp_baseline == 1
+                fx, fy = _pareto_frontier(cost_baseline[mask], mean_p_baseline[mask], method=frontier_method)
+                y_interp_baseline = interp1d(fx, fy, kind="previous", bounds_error=False, fill_value=(0, max(fy)))(x_interp)
+                nonzero_mask_baseline = y_interp_baseline > 0
+
+                # Store baseline data for bar charts
+                baseline_max_asr = np.max(y_interp_baseline[nonzero_mask_baseline]) if np.any(nonzero_mask_baseline) else 0
+                baseline_frontier_data = {
+                    'x': x_interp[nonzero_mask_baseline],
+                    'y': y_interp_baseline[nonzero_mask_baseline],
+                    'max_asr': baseline_max_asr
+                }
+
+                plt.plot(
+                    x_interp[nonzero_mask_baseline],
+                    y_interp_baseline[nonzero_mask_baseline],
+                    marker="o",
+                    linewidth=1.8,
+                    markersize=2,
+                    label=f"greedy",
+                    color="r",
+                )
+
     plt.title(title + title_suffix)
-    plt.grid(True, linewidth=0.3)
+    plt.grid(True, alpha=0.3)
     plt.ylim(bottom=0)
     plt.xscale(x_scale)
     plt.legend(title="Frontiers", loc="upper left" if x_scale == "log" else "lower right")
+
+    # ---------- Bar Chart 1: Max ASR Comparison (Vertical Slice) ----------
+    ax2 = plt.subplot2grid((1, 4), (0, 2))
+
+    methods = []
+    max_asrs = []
+    colors = []
+
+    # Add baseline (delta = 0 for baseline)
+    if baseline_frontier_data is not None:
+        methods.append("Greedy")
+        max_asrs.append(0.0)  # Delta from itself is 0
+        colors.append("red")
+
+    # Add sampling methods (calculate delta from baseline)
+    for j in sample_levels_to_plot:
+        if j in frontier_data:
+            methods.append(f"{j} samples")
+            delta_asr = frontier_data[j]['max_asr'] - baseline_max_asr if baseline_frontier_data is not None else 0
+            max_asrs.append(delta_asr)
+            colors.append(frontier_data[j]['color'])
+
+    if methods:
+        bars = plt.bar(methods, max_asrs, color=colors, alpha=0.7, edgecolor='black')
+        plt.xlabel("Method", fontsize=12)
+        if threshold is None:
+            plt.ylabel(r"$\Delta$ $p_{harmful}$ - greedy", fontsize=12)
+        else:
+            plt.ylabel(r"Max $p_{harmful}$" + f" (threshold: {threshold})", fontsize=12)
+        plt.title(r"Max $p_{harmful}$ Comparison", fontsize=12)
+        plt.xticks(rotation=45, ha='right')
+        plt.grid(True, alpha=0.3, axis='y')
+        # Increase ylim by 2% on top and bottom
+        ymin, ymax = plt.ylim()
+        margin = (ymax - ymin) * 0.03
+        plt.ylim(ymin - margin, ymax + margin)
+
+        # ----- add labels with a 4-point gap -----
+        for bar, value in zip(bars, max_asrs):
+            # choose label position: above for positive, below for negative
+            offset_pt = 4      # visual gap in points
+            y = bar.get_height()
+            va = 'bottom' if y >= 0 else 'top'
+            offset = (0, offset_pt if y >= 0 else -offset_pt)
+
+            ax2.annotate(f'{value:.3f}',
+                        xy=(bar.get_x() + bar.get_width()/2, y),
+                        xytext=offset,
+                        textcoords='offset points',
+                        ha='center', va=va, fontsize=10)
+
+    # ---------- Bar Chart 2: FLOPS Efficiency to Reach Greedy ASR (Horizontal Slice) ----------
+    ax3 = plt.subplot2grid((1, 4), (0, 3))
+
+    if baseline_frontier_data is not None and baseline_max_asr > 0:
+        methods_flops = []
+        flops_required = []
+        colors_flops = []
+
+        # Find FLOPS required to reach baseline ASR for each sampling method
+        target_asr = baseline_max_asr
+
+        for j in sample_levels_to_plot:
+            if j in frontier_data:
+                # Find the minimum FLOPS where ASR >= target_asr
+                y_vals = frontier_data[j]['y']
+                x_vals = frontier_data[j]['x']
+
+                # Find points where ASR >= target_asr
+                valid_indices = y_vals >= target_asr
+                if np.any(valid_indices):
+                    min_flops = np.min(x_vals[valid_indices])
+                    methods_flops.append(f"{j} samples")
+                    flops_required.append(min_flops)
+                    colors_flops.append(frontier_data[j]['color'])
+
+        # Add baseline (find minimum FLOPS where it reaches target ASR)
+        if baseline_frontier_data['x'].size > 0:
+            # Find the minimum FLOPS where baseline ASR >= target_asr
+            baseline_y_vals = baseline_frontier_data['y']
+            baseline_x_vals = baseline_frontier_data['x']
+            baseline_valid_indices = baseline_y_vals >= target_asr
+            if np.any(baseline_valid_indices):
+                baseline_flops = np.min(baseline_x_vals[baseline_valid_indices])
+            else:
+                # Fallback to minimum FLOPS if no point reaches target ASR
+                baseline_flops = np.min(baseline_x_vals)
+            methods_flops.insert(0, "Greedy")
+            flops_required.insert(0, baseline_flops)
+            colors_flops.insert(0, "red")
+
+        if methods_flops:
+            bars = plt.bar(methods_flops, flops_required, color=colors_flops, alpha=0.7, edgecolor='black')
+            plt.xlabel("Method", fontsize=12)
+            plt.ylabel("FLOPS Required", fontsize=12)
+            plt.title(r"FLOPS to Reach Greedy $p_{harmful}$" + f" ( = {target_asr:.3f})", fontsize=12)
+            plt.xticks(rotation=45, ha='right')
+            plt.yscale('log')
+            plt.grid(True, alpha=0.3, axis='y')
+            # Increase ylim by 2% on top and bottom
+            ymin, ymax = plt.ylim()
+            plt.ylim(ymin, ymax * 1.1)
+
+            # Add value labels on bars
+            # for bar, value in zip(bars, flops_required):
+            #     plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() * 1.1,
+            #             f'{value:.2e}', ha='center', va='bottom', fontsize=9, rotation=45)
+            # --- constant 5-point vertical gap ---
+            for bar, value in zip(bars, flops_required):
+                ax3.annotate(f'{value:.2e}',
+                            xy=(bar.get_x() + bar.get_width()/2, value),   # anchor at top of bar
+                            xytext=(0, 5),                                  # 5 points straight up
+                            textcoords='offset points',
+                            ha='center', va='bottom', rotation=45, fontsize=9)
+
     plt.tight_layout()
     plt.savefig(f"evaluate/distributional_paper/pareto_plots/{title}.pdf")
+    plt.close()
 
 
 def flops_ratio_plot(
@@ -356,6 +506,7 @@ def flops_ratio_plot(
     flops_per_step: int | None = None,
     threshold: float|None = None,
     color_scale: str = "linear",
+    color_by: str = "samples",
     verbose: bool = True,
 ):
     """
@@ -381,6 +532,8 @@ def flops_ratio_plot(
         Threshold for binary classification
     color_scale : str
         Color scale type ("linear" or "log")
+    color_by : str
+        What to color points by: "samples" (number of samples) or "total_flops" (total FLOP usage)
     verbose : bool
         Whether to print debug information
     """
@@ -427,44 +580,64 @@ def flops_ratio_plot(
     pts = get_ratio_pts(y, flops_optimization, flops_sampling)
     ratio, step_idx, n_samp, mean_p, opt_flop, sampling_flop = pts.T
 
+    # Calculate total FLOPS for coloring option
+    total_flop = opt_flop + sampling_flop
+
     # Filter out infinite ratios for plotting
     finite_mask = np.isfinite(ratio)
     ratio_finite = ratio[finite_mask]
     mean_p_finite = mean_p[finite_mask]
     n_samp_finite = n_samp[finite_mask]
+    total_flop_finite = total_flop[finite_mask]
 
     plt.figure(figsize=(10, 6))
+
+    # Choose color values based on color_by parameter
+    if color_by == "samples":
+        color_values = n_samp_finite
+        color_label = "Number of Samples"
+    elif color_by == "total_flops":
+        color_values = total_flop_finite
+        color_label = "Total FLOPS"
+    else:
+        raise ValueError(f"color_by must be 'samples' or 'total_flops', got '{color_by}'")
 
     # Scatter plot
     if color_scale == "log":
         color_norm = LogNorm()
+    elif color_scale == "sqrt":
+        color_norm = PowerNorm(gamma=0.5)  # Square root normalization
     else:
         color_norm = None
 
-    sc = plt.scatter(ratio_finite, mean_p_finite, c=n_samp_finite, cmap="viridis", alpha=0.3, s=15, norm=color_norm)
-    plt.colorbar(sc, label="Number of Samples")
+    sc = plt.scatter(ratio_finite, mean_p_finite, c=color_values, cmap="viridis", alpha=0.3, s=15, norm=color_norm)
+    if color_by != "samples":
+        plt.colorbar(sc, label=color_label)
 
-    # Highlight specific sample levels
-    cmap = plt.get_cmap("viridis")
-    if color_scale == "log":
-        norm = LogNorm(n_samp.min(), n_samp.max())
-    else:
-        norm = plt.Normalize(n_samp.min(), n_samp.max())
+    # Highlight specific sample levels (only when coloring by samples)
+    if color_by == "samples":
+        cmap = plt.get_cmap("viridis")
+        if color_scale == "log":
+            norm = LogNorm(n_samp.min(), n_samp.max())
+        elif color_scale == "sqrt":
+            norm = PowerNorm(gamma=0.5, vmin=n_samp.min(), vmax=n_samp.max())
+        else:
+            norm = plt.Normalize(n_samp.min(), n_samp.max())
 
-    for j in sample_levels_to_plot:
-        mask = (n_samp == j) & finite_mask
-        if np.any(mask):
-            color = cmap(norm(j))
-            plt.scatter(ratio[mask], mean_p[mask],
-                       color=color, s=50, alpha=0.8,
-                       edgecolors='black', linewidth=0.5,
-                       label=f"{j} samples")
+        for j in sample_levels_to_plot:
+            mask = (n_samp == j) & finite_mask
+            if np.any(mask):
+                color = cmap(norm(j))
+                plt.scatter(ratio[mask], mean_p[mask],
+                           color=color, s=50, alpha=0.8,
+                           edgecolors='black', linewidth=0.5,
+                           label=f"{j} samples")
 
     plt.xlabel("Sampling FLOPS / Total FLOPS", fontsize=14)
     if threshold is None:
         plt.ylabel("Mean p_harmful", fontsize=14)
     else:
-        plt.ylabel(f"Mean ASR (threshold: {threshold})", fontsize=14)
+        plt.ylabel(f"Max ASR (threshold: {threshold})", fontsize=12)
 
     plt.grid(True, alpha=0.3)
     plt.title(title, fontsize=16)
@@ -564,6 +737,24 @@ ATTACKS = [
         },
     )),
     ("gcg", dict(
+        title_suffix="GCG 500",
+        cumulative=False,
+        sample_params=lambda: {
+            "generation_config": {"num_return_sequences": 500, "temperature": 0.7},
+            "num_steps": 250,
+            "loss": "ce",
+            "token_selection": "default",
+            "use_prefix_cache": True,
+        },
+        baseline_params=lambda: {
+            "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
+            "num_steps": 250,
+            "loss": "ce",
+            "token_selection": "default",
+            "use_prefix_cache": True,
+        },
+    )),
+    ("gcg", dict(
         title_suffix="GCG Entropy Loss",
         cumulative=False,
         sample_params=lambda: {
@@ -632,7 +823,7 @@ ATTACKS = [
 ]
 
 METRIC = ("scores", "strong_reject", "p_harmful")
-GROUP_BY = {("model",)}
+GROUP_BY = {"model", "attack_params"}
 DATASET_IDX = list(range(50))
 
 
@@ -643,7 +834,7 @@ def run_attack(
     atk_name: str,
     cfg: dict,
 ):
-    print("Attack:", atk_name)
+    print("Attack:", atk_name, cfg["title_suffix"])
 
     # ---------- helper to fetch data ----------
     def fetch(attack: str, attack_params: dict):
@@ -678,6 +869,7 @@ def run_attack(
         metric=METRIC,
         flops_per_step=lambda x: FLOPS_PER_STEP.get(atk_name, lambda x, c: 0)(x, num_model_params(model)),
         threshold=None,
+        color_scale="sqrt",
     )
 
 
@@ -722,17 +914,19 @@ def run_attack_flops_ratio(
         metric=METRIC,
         flops_per_step=lambda x: FLOPS_PER_STEP.get(atk_name, lambda x, c: 0)(x, num_model_params(model)),
         threshold=None,
+        # color_by="total_flops",
+        color_scale="sqrt",
     )
 
 
 # # Main loop ------------------------------------------------------------------------
-# for model_key, model_title in MODELS.items():
-#     print("Model:", model_key)
-#     for atk_name, atk_cfg in ATTACKS:
-#         try:
-#             run_attack(model_key, model_title, atk_name, atk_cfg)
-#         except Exception as e:
-#             print(f"Error running attack {atk_name}, atk_cfg: {atk_cfg['title_suffix']}: {e}")
+for model_key, model_title in MODELS.items():
+    print("Model:", model_key)
+    for atk_name, atk_cfg in ATTACKS:
+        try:
+            run_attack(model_key, model_title, atk_name, atk_cfg)
+        except Exception as e:
+            print(f"Error running attack {atk_name}, atk_cfg: {atk_cfg['title_suffix']}: {e}")
 
 
 # FLOPS Ratio plots main loop ------------------------------------------------------
@@ -743,10 +937,10 @@ print("="*80)
 for model_key, model_title in MODELS.items():
     print("Model:", model_key)
     for atk_name, atk_cfg in ATTACKS:
-        # try:
+        try:
             run_attack_flops_ratio(model_key, model_title, atk_name, atk_cfg)
-        # except Exception as e:
-        #     print(f"Error running FLOPS ratio attack {atk_name}, atk_cfg: {atk_cfg['title_suffix']}: {e}")
+        except Exception as e:
+            print(f"Error running FLOPS ratio attack {atk_name}, atk_cfg: {atk_cfg['title_suffix']}: {e}")
 
 
 # Helper ---------------------------------------------------------------------------
@@ -822,7 +1016,7 @@ def run_attack_2(
         )
         paths = get_filtered_and_grouped_paths(filter_by, GROUP_BY)
         results = collect_results(paths, infer_sampling_flops=True)
-        assert len(results) == 1, len(results)
+        assert len(results) == 1, f"Should only have exactly one type of result, got {len(results)}, {list(results.keys())}"
         return list(results.values())[0]
 
     # ---------- sampled run ----------
