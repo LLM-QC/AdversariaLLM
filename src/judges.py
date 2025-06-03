@@ -48,9 +48,9 @@ class Judge(abc.ABC):
         pass
 
     @torch.no_grad()
-    def __call__(self, chats: List[List[Dict[str, str]]]) -> Dict[str, List[float]]:
+    def __call__(self, chats: List[List[Dict[str, str]]], verbose: bool = False) -> Dict[str, List[float]]:
         """Allows calling the judge instance directly."""
-        return with_max_batchsize(self.judge, chats)
+        return with_max_batchsize(self.judge, chats, verbose=verbose)
 
     @staticmethod
     def validate_chats(

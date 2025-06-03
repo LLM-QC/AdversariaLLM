@@ -110,6 +110,10 @@ def main(cfg: DictConfig) -> None:
     print(filter_by)
     # get all paths
     paths = get_filtered_and_grouped_paths(filter_by, None)[("all", )]
+    if not paths:
+        logging.info("No paths found, exiting")
+        return
+
     n = 0
     pbar = tqdm(paths, file=sys.stdout)
     backend = "hf"
@@ -159,12 +163,13 @@ def main(cfg: DictConfig) -> None:
                     model,
                     tokenizer,
                     tokens,
-                    initial_batch_size=len(tokens),
+                    initial_batch_size=None,
                     num_return_sequences=n_to_generate,
                     max_new_tokens=gen_config["max_new_tokens"],
                     temperature=gen_config["temperature"],
                     top_p=gen_config["top_p"],
-                    top_k=gen_config["top_k"]
+                    top_k=gen_config["top_k"],
+                    verbose=True
                 )  # (n_steps, n_to_generate)
 
                 # have to also add classifier scores for new completions
@@ -185,7 +190,7 @@ def main(cfg: DictConfig) -> None:
                             else:
                                 modified_prompt.append({"role": "assistant", "content": completion})
                             modified_prompts.append(modified_prompt)
-                    results = judge(modified_prompts)
+                    results = judge(modified_prompts, verbose=True)
                     if all(r is None for r in results):
                         continue
                     i = 0
@@ -202,11 +207,36 @@ def main(cfg: DictConfig) -> None:
 
                 pbar.set_description(f"{len(subrun['steps']) * n_to_generate} | {n} total")
 
+            log_dir = os.path.join(cfg.save_dir, date_time_string)
+            i = 0
+            while os.path.exists(os.path.join(log_dir, str(i), f"run.json")):
+                i += 1
+            log_file = os.path.join(log_dir, str(i), f"run.json")
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            json.dump(attack_run, open(log_file, "w"), indent=2, cls=CompactJSONEncoder)
 
-            json.dump(attack_run, open(path, "w"), indent=2, cls=CompactJSONEncoder)
             db = get_mongodb_connection()
             collection = db.runs
-            collection.update_many({"log_file": path}, {"$set": {"config.attack_params.generation_config.num_return_sequences": cfg.num_return_sequences}})
+
+            # Find all entries that match the original log_file path
+            matching_entries = list(collection.find({"log_file": path}))
+
+            # Create new entries with updated log_file and num_return_sequences
+            new_entries = []
+            for entry in matching_entries:
+                new_entry = entry.copy()
+                # Remove the _id field so MongoDB will generate a new one
+                if "_id" in new_entry:
+                    del new_entry["_id"]
+                # Update the log_file to the new path
+                new_entry["log_file"] = log_file
+                # Update the num_return_sequences in the config
+                new_entry["config"]["attack_params"]["generation_config"]["num_return_sequences"] = cfg.num_return_sequences
+                new_entries.append(new_entry)
+
+            # Insert the new entries if any were found
+            if new_entries:
+                collection.insert_many(new_entries)
         except Exception as e:
             logging.error(f"Error in {path}. Original exception: {e}")
             raise Exception(f"Error in {path}. Original exception: {e}") from e
