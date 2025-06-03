@@ -50,7 +50,7 @@ def generate_ragged_batched(
     # Shorter sequences will come first to maximize batch size
     sorted_indexed_inputs = sorted(list(enumerate(input_list)), key=lambda x: x[1].size(0))
 
-    # Duplicate each prompt for multiple return sequences here is faster because it
+    # Duplicating each prompt for multiple return sequences here is faster because it
     # avoids the slower for-loop in generate_ragged_batched. We can't easily move this
     # inside generate_ragged directly because we need to do it outside of the
     # with_max_batchsize context.
