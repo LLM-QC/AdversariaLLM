@@ -4,16 +4,17 @@ import random
 import string
 import sys
 from functools import lru_cache
-from typing import Callable, Literal
+from typing import Any, Callable, Iterator, Literal, Mapping, Optional, Sequence
 
+import json5
 import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 from transformers import DynamicCache, HybridCache, PreTrainedModel, PreTrainedTokenizerBase
 
-from src.attacks.attack import Conversation
 from src.io_utils import free_vram
+from src.types import Conversation, JsonSchema
 
 
 @torch.no_grad()
@@ -179,6 +180,7 @@ def generate_ragged(
     top_p: float = 1.0,
     top_k: int = 0,
     num_return_sequences: int = 1,
+    json_schema: JsonSchema = None
 ) -> list[list[str]] | list[list[torch.Tensor]]:
     """
     Generate completions for multiple prompts in a single batch.
@@ -259,6 +261,8 @@ def generate_ragged(
     stop_ids = get_stop_token_ids(model, tokenizer).to(model.device)
     idx_range = torch.arange(B, device=model.device)
     all_tokens = []
+    token_filter = JSONFilter(json_schema, tokenizer, B) if json_schema else NullFilter()
+    prev_tokens = torch.full((B,), tokenizer.pad_token_id, device=model.device)
     for i in range(num_return_sequences):
         tokens = torch.full((B, max_new_tokens), tokenizer.pad_token_id, device=model.device)
         finished = torch.zeros(B, dtype=torch.bool, device=model.device)
@@ -298,6 +302,7 @@ def generate_ragged(
                     position_ids=position_ids[:, :next_token_idx],
                 )
                 logits = outputs.logits[:, -1]
+                logits = token_filter.step(prev_tokens, logits)
                 next_tokens = sample_next_token(logits)
                 padded_embeddings[idx_range, next_token_idx] = (
                     model.get_input_embeddings()(next_tokens).detach()
@@ -307,6 +312,8 @@ def generate_ragged(
                 if finished.all():
                     logging.info(f"Early exit after {i}/{max_new_tokens} tokens.")
                     break
+                prev_tokens.fill_(tokenizer.pad_token_id)     # reset sentinel
+                prev_tokens[~finished] = next_tokens[~finished]
                 next_token_idx += 1
         elif padding_side == "right":
             # Add right padding
@@ -374,8 +381,11 @@ def generate_ragged(
 
                     logits_out = torch.empty((B, logits.size(2)), dtype=model.dtype, device=model.device)
                     logits_out[~finished] = logits[:, 0]
+                    logits_out = token_filter.step(prev_tokens, logits_out)
                     next_tokens = torch.full((B,), tokenizer.eos_token_id, device=model.device)
                     next_tokens[generating] = sample_next_token(logits_out[generating])
+                    prev_tokens.fill_(tokenizer.pad_token_id)
+                    prev_tokens[generating] = next_tokens[generating]
 
                     padded_embeddings[idx_range[generating], next_token_idx.min()] = model.get_input_embeddings()(next_tokens[generating])
                     tokens[generating, lengths[generating]] = next_tokens[generating]
@@ -405,6 +415,7 @@ def generate_ragged(
                 for i in range(max_new_tokens):
                     outputs = model(inputs_embeds=padded_embeddings[:, : next_token_idx.max()])
                     logits = outputs.logits[torch.arange(B), next_token_idx - 1]
+                    logits = token_filter.step(prev_tokens, logits)
                     next_tokens = sample_next_token(logits)
                     padded_embeddings[idx_range, next_token_idx] = (
                         model.get_input_embeddings()(next_tokens)
@@ -414,6 +425,8 @@ def generate_ragged(
                     if finished.all():
                         logging.info(f"Early exit after {i}/{max_new_tokens} tokens.")
                         break
+                    prev_tokens.fill_(tokenizer.pad_token_id)     # reset sentinel
+                    prev_tokens[~finished] = next_tokens[~finished]
                     next_token_idx += 1
         else:
             raise ValueError(f"Unknown padding_side: {padding_side}")
@@ -435,6 +448,9 @@ def generate_ragged(
     stop_tokens = tokenizer.convert_ids_to_tokens(stop_ids)
     completion = [tokenizer.batch_decode(all_tokens[i], skip_special_tokens=False) for i in range(B)]
     completion = [[min([c.split(t)[0] for t in stop_tokens], key=len) for c in completion[i]] for i in range(B)]
+    if json_schema:
+        validate_json_strings([gen for comp in completion for gen in comp], json_schema)
+
     return completion
 
 
@@ -1161,3 +1177,260 @@ def get_flops(model: PreTrainedModel, n_tokens_in: int, n_tokens_out: int, type:
         return model.num_parameters(exclude_embeddings=True) * n_tokens * 6
     else:
         raise ValueError(f"Invalid type: {type}")
+
+
+class NullFilter:  # <- used when json_schema=None
+    def step(
+        self,
+        token_histories: list[list[int]],  # token IDs so far, per row
+        logits: torch.Tensor,  # (B, vocab)
+    ) -> torch.Tensor:
+        return logits  # no masking
+
+
+class JSONFilter:
+    """
+    Logits-filter helper:
+      1. enforces JSON schema with lm-format-enforcer
+      2. suppresses leading whitespace
+      3. limits runs of whitespace-only tokens to `max_ws_run`
+    """
+
+    def __init__(
+        self,
+        schema: dict,
+        tokenizer: PreTrainedTokenizerBase,
+        batch_size: int,
+        max_ws_run: int = 2,
+    ):
+        from lmformatenforcer import JsonSchemaParser
+        from lmformatenforcer.integrations.transformers import (
+            build_token_enforcer_tokenizer_data,
+        )
+        from lmformatenforcer.tokenenforcer import TokenEnforcer
+
+        tok_data = build_token_enforcer_tokenizer_data(tokenizer)
+        self.enforcers: list[TokenEnforcer] = [
+            TokenEnforcer(tok_data, JsonSchemaParser(schema)) for _ in range(batch_size)
+        ]
+        self.token_histories = [[] for _ in range(batch_size)]
+
+        # ── whitespace handling ──────────────────────────────────────────
+        self.ws_ids: set[int] = {tid for tid in range(tokenizer.vocab_size) if tokenizer.decode([tid]).strip() == ""}
+        self.seen_real = [False] * batch_size  # any non-WS token emitted yet?
+        self.streak = [0] * batch_size  # current run length of WS tokens
+        self.max_ws_run = max_ws_run
+
+        # misc
+        self.PAD = tokenizer.pad_token_id
+        self.tokenizer = tokenizer
+
+    # ------------------------------------------------------------------ #
+    def _is_ws(self, tid: int) -> bool:
+        return tid in self.ws_ids
+
+    # ------------------------------------------------------------------ #
+    def step(self, prev_tokens: torch.LongTensor, logits: torch.Tensor) -> torch.Tensor:
+        B, V = logits.shape
+
+        # 1 update histories + whitespace state from *previous* step
+        for i in range(B):
+            tid = prev_tokens[i].item()
+            if tid == self.PAD:
+                continue
+
+            self.token_histories[i].append(tid)
+
+            if self._is_ws(tid):
+                self.streak[i] += 1
+            else:
+                self.streak[i] = 0
+                self.seen_real[i] = True
+
+        # 2 build masked logits
+        masked = torch.full_like(logits, float("-inf"))
+
+        for i, enf in enumerate(self.enforcers):
+            allowed = [tid for tid in enf.get_allowed_tokens(self.token_histories[i]) if 0 <= tid < V]
+
+            # ── strip disallowed whitespace tokens ─────────────────────
+            cand = []
+            for tid in allowed:
+                if not self._is_ws(tid):
+                    cand.append(tid)
+                    continue
+
+                # pure whitespace token:
+                if not self.seen_real[i]:
+                    # leading WS -> skip
+                    continue
+                if self.streak[i] >= self.max_ws_run:
+                    # run too long -> skip
+                    continue
+                cand.append(tid)
+
+            # never leave the model with no options
+            if not cand:
+                cand = allowed
+
+            masked[i, cand] = logits[i, cand]
+
+        return masked
+
+
+def validate_json_strings(json_likes: list[str], schema: JsonSchema) -> None:
+    """
+    Validate a list of JSON-like strings against a schema.
+
+    Parameters:
+    - json_likes: List of JSON-like strings to validate.
+    - schema: JsonSchema object defining the validation rules.
+
+    Raises:
+    - SchemaValidationError: If any string does not conform to the schema.
+    """
+    for json_like in json_likes:
+        _validate_json_string(json_like, schema)
+
+
+def _validate_json_string(json_like: str, schema: JsonSchema) -> None:
+    json_obj = _parse_json(json_like)
+    if json_obj is None:
+        raise SchemaValidationError(f"Invalid JSON string: {json_like}")
+    _validate_json(schema, json_obj)
+
+
+class SchemaValidationError(RuntimeError):
+    """Raised when a value violates the (trimmed-down) schema."""
+
+
+def _validate_json(schema: Mapping[str, Any], value: Any) -> None:
+    """
+    Minimal validator for LM Format Enforcer–style schemas.
+
+    Checks:
+      • required keys present
+      • no unexpected keys unless "additionalProperties": true
+      • primitive types: string / integer  (bools rejected as ints)
+      • integer "maximum" keyword
+      • full recursion into nested objects/arrays
+
+    Raises SchemaValidationError on the first mismatch.
+    Returns None on success.
+    """
+
+    def _rec(sch: Mapping[str, Any], val: Any, path: str = "$") -> None:
+        node_type = sch.get("type")
+        is_obj = node_type == "object" or "properties" in sch
+        is_arr = node_type == "array"
+
+        # ── objects ──────────────────────────────────────────────────────
+        if is_obj:
+            if not isinstance(val, dict):
+                raise SchemaValidationError(f"{path}: expected object")
+
+            props: Mapping[str, Any] = sch.get("properties", {})
+            required: Sequence[str] = sch.get("required", [])
+            addl_ok = bool(sch.get("additionalProperties", False))
+
+            for key in required:
+                if key not in val:
+                    raise SchemaValidationError(f"{path}: missing key '{key}'")
+
+            for key in val:
+                if key not in props and not addl_ok:
+                    raise SchemaValidationError(f"{path}: unexpected key '{key}'")
+
+            for key in props:
+                if key in val:
+                    _rec(props[key], val[key], f"{path}.{key}")
+
+        # ── arrays ───────────────────────────────────────────────────────
+        elif is_arr:
+            if not isinstance(val, list):
+                raise SchemaValidationError(f"{path}: expected array")
+            item_schema = sch.get("items")
+            if item_schema:
+                for idx, item in enumerate(val):
+                    _rec(item_schema, item, f"{path}[{idx}]")
+
+        # ── primitives ───────────────────────────────────────────────────
+        elif node_type == "string":
+            if not isinstance(val, str):
+                raise SchemaValidationError(f"{path}: expected string")
+
+        elif node_type == "integer":
+            if type(val) is not int:  # bools fail
+                raise SchemaValidationError(f"{path}: expected integer")
+            if "maximum" in sch and val > sch["maximum"]:
+                raise SchemaValidationError(f"{path}: {val} > maximum {sch['maximum']}")
+
+        # ── anything else = treated as 'no constraints' ────────────────
+
+    _rec(schema, value)
+
+
+def _get_json_candidates(text: str) -> Iterator[str]:
+    """
+    Yield every balanced  {...}  *or*  [...]  block that occurs in `text`,
+    while ignoring braces/brackets that live inside quoted strings.
+
+    Works in a single left-to-right pass (O(n)), no regex recursion.
+    """
+    in_string: str | None = None  # current quote char or None
+    escape = False
+    stack: list[str] = []  # expected closing symbols
+    start = None  # index of the first opening symbol
+    match_closer = {"{": "}", "[": "]"}  # open → close
+
+    for i, ch in enumerate(text):
+        # ── string handling ────────────────────────────────────────────
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_string:
+                in_string = None  # string closes
+            continue
+
+        if ch in ('"', "'"):
+            in_string = ch
+            continue
+
+        # ── brace / bracket tracking ──────────────────────────────────
+        if ch in match_closer:  # opening { or [
+            if not stack:
+                start = i
+            stack.append(match_closer[ch])
+
+        elif ch in ("]", "}"):  # closing ] or }
+            if not stack or ch != stack[-1]:
+                # mismatched closer – reset tracking
+                stack.clear()
+                start = None
+                continue
+            stack.pop()
+            if not stack and start is not None:
+                yield text[start : i + 1]  # balanced block found
+                start = None  # keep scanning
+
+
+def _parse_json(output: str) -> Optional[Any]:
+    """
+    Extract and parse the first valid JSON/JSON5 object embedded in *output*.
+    Returns the parsed value, or None if nothing parses.
+    """
+    for block in _get_json_candidates(output):
+        try:
+            return json5.loads(block)
+        except Exception as e:
+            logging.info("Failed to parse JSON candidate:", block)
+            logging.info("Error:", e)
+            logging.info("Continuing to search for valid JSON candidates...")
+            #     # skip to next candidate
+            continue
+
+    logging.info("No valid JSON object found in the output.")
+
+    return None  # no valid JSON found

@@ -76,18 +76,19 @@ def run_judges(cfg: DictConfig) -> None:
                 if (cfg.classifier == "overrefusal") != (attack_run["config"]["dataset"] in ("or_bench", "xs_test")):
                     continue
                 for subrun in attack_run["runs"]:
-                    prompt = subrun["original_prompt"]
+                    original_conversation = subrun["original_prompt"]
                     modified_prompts = []
                     if cfg.classifier in subrun["steps"][0]["scores"]:
                         continue
                     for step in subrun["steps"]:
+                        model_input = step["model_input"]
                         completions: list = step["model_completions"]
                         for completion in completions:
-                            modified_prompt = copy.deepcopy(prompt)
+                            modified_prompt = copy.deepcopy(original_conversation)
                             if modified_prompt[-1]["role"] == "assistant":
-                                modified_prompt[-1]["content"] += completion
+                                modified_prompt[-1]["content"] = model_input[-1]["content"] + completion
                             else:
-                                modified_prompt.append({"role": "assistant", "content": completion})
+                                modified_prompt.append({"role": "assistant", "content": model_input[-1]["content"] + completion})
                             modified_prompts.append(modified_prompt)
                     pbar.set_description(f"{len(modified_prompts)} | {n} total")
                     results = judge(modified_prompts)
