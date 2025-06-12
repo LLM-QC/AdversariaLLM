@@ -545,21 +545,25 @@ def collect_results(paths, infer_sampling_flops=False) -> dict[tuple[str], dict[
     for k, v in paths.items():
         aggregated_results = defaultdict(list)
         for path in v:
-            results = cached_json_load(path)
-            for run in results["runs"]:
-                collected_metrics = defaultdict(list)
-                for step in run["steps"]:
-                    if infer_sampling_flops:
-                        max_new_tokens = results["config"]["attack_params"]["generation_config"]["max_new_tokens"]
-                        model_params = num_model_params(results["config"]["model_params"]["id"])
-                        step["flops_sampling_prefill_cache"] = model_params * len(step["model_input_tokens"]) * 2
-                        step["flops_sampling_generation"] = model_params * max_new_tokens * 2
-                    for metric in step.keys():
-                        # this will fill collected_metrics with values from step[metric]
-                        # and handles nested containers
-                        _gather(step[metric], (metric,), collected_metrics)
-                for metric, v in collected_metrics.items():
-                    aggregated_results[metric].append(v)
+            try:
+                results = cached_json_load(path)
+                for run in results["runs"]:
+                    collected_metrics = defaultdict(list)
+                    for step in run["steps"]:
+                        if infer_sampling_flops:
+                            max_new_tokens = results["config"]["attack_params"]["generation_config"]["max_new_tokens"]
+                            model_params = num_model_params(results["config"]["model_params"]["id"])
+                            step["flops_sampling_prefill_cache"] = model_params * len(step["model_input_tokens"]) * 2
+                            step["flops_sampling_generation"] = model_params * max_new_tokens * 2
+                        for metric in step.keys():
+                            # this will fill collected_metrics with values from step[metric]
+                            # and handles nested containers
+                            _gather(step[metric], (metric,), collected_metrics)
+                    for metric, v in collected_metrics.items():
+                        aggregated_results[metric].append(v)
+            except Exception as e:
+                print(f"Error loading {path}")
+                raise e
         all_results[k] = aggregated_results
     return all_results
 

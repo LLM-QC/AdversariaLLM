@@ -11,7 +11,7 @@ args.add_argument("--skip_a100", action="store_true")
 args.add_argument("--skip_h100", action="store_true")
 args = args.parse_args()
 
-model_name = args.model
+model = args.model
 attacks_a100 = [
     "gcg",
     "autodan",
@@ -27,8 +27,8 @@ attacks_h100 = [
 
 # Base command template
 template_a100 = (
-    "python run_attacks.py -m ++model_name={model_name} ++attack_name={attack_name} "
-    "++datasets.adv_behaviors.idx={indices} ++dataset_name=adv_behaviors "
+    "python run_attacks.py -m ++model={model} ++attack={attack} "
+    "++datasets.adv_behaviors.idx={indices} ++dataset=adv_behaviors "
     "++hydra.launcher.timeout_min=300 "
 )
 
@@ -38,8 +38,8 @@ template_h100 = (
 )
 # Base command template
 template_pgd = (
-    "python run_attacks.py ++model_name={model_name} ++attack_name=pgd "
-    '++datasets.adv_behaviors.idx="{indices}" ++dataset_name=adv_behaviors '
+    "python run_attacks.py ++model={model} ++attack=pgd "
+    '++datasets.adv_behaviors.idx="{indices}" ++dataset=adv_behaviors '
     "++hydra.launcher.timeout_min=300 ++hydra.launcher.qos=deadline "
     "++attacks.pgd.epsilon=0.5 ++attacks.pgd.normalize_alpha=true ++attacks.pgd.normalize_gradient=true ++attacks.pgd.alpha=0.01 "
     "-m "
@@ -51,23 +51,23 @@ commands = []
 if not args.skip_a100:
     commands.append(
         template_a100.format(
-            model_name=model_name,
-            attack_name=",".join(attacks_a100),
+            model=model,
+            attack=",".join(attacks_a100),
             indices=indices,
         )
     )
 if not args.skip_h100:
     commands.append(
         template_h100.format(
-            model_name=model_name,
-            attack_name=",".join(attacks_h100),
+            model=model,
+            attack=",".join(attacks_h100),
             indices=indices,
         )
     )
 if args.pgd:
     commands.append(
         template_pgd.format(
-            model_name=model_name,
+            model=model,
             indices=list(range(args.min_idx, args.max_idx)),
         )
     )

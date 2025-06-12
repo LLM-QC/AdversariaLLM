@@ -21,6 +21,6 @@ overwrite: false
 classifiers: ["strong_reject"] # Options: "strong_reject", "cais", "llama_guard_3_8b", "overrefusal", etc. (can be list[str]|null)
 
 # overrides for parallelism
-attack_name: null
-dataset_name: adv_behaviors
-model_name: null
+attack: null
+dataset: adv_behaviors
+model: null

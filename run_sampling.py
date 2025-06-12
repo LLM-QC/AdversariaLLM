@@ -6,9 +6,9 @@ The easiest way to implement the filtering is using the sampling.yaml config.
 Example:
 
 filter_by:
-  model_name:
+  model:
     - google/gemma-3-1b-it
-  attack_name:
+  attack:
     - gcg
     - pgd
 
@@ -16,7 +16,6 @@ The script also accepts a `num_return_sequences` argument, which specifies how m
 completions the runs should have in the end.
 """
 import os
-from dataclasses import dataclass
 from datetime import datetime
 
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # determinism
@@ -32,24 +31,13 @@ from vllm import LLM, SamplingParams, TokensPrompt
 
 from src.dataset import json
 from src.errors import print_exceptions
-from src.io_utils import (CompactJSONEncoder, free_vram, get_filtered_and_grouped_paths,
-                          get_mongodb_connection, load_model_and_tokenizer)
+from src.io_utils import (CompactJSONEncoder, RunConfig, free_vram, get_filtered_and_grouped_paths,
+                          get_mongodb_connection, load_model_and_tokenizer, filter_config)
 from src.judges import Judge
 from src.lm_utils import generate_ragged_batched
 
 torch.use_deterministic_algorithms(True, warn_only=True)
 torch.backends.cuda.matmul.allow_tf32 = True
-
-
-@dataclass
-class RunConfig:
-    model: str
-    dataset: str
-    attack: str
-    model_params: dict
-    dataset_params: dict
-    attack_params: dict
-    config: dict
 
 
 def eval_list_expressions_in_dict(d):
@@ -135,7 +123,18 @@ def main(cfg: DictConfig) -> None:
                 logging.info(f"Skipping {path}, it already has {n_already_generated} completions")
                 continue
             attack_run["config"]["attack_params"]["generation_config"]["num_return_sequences"] = cfg.num_return_sequences
-            model_params = OmegaConf.create(attack_run["config"]["model_params"])
+            run_config = RunConfig(
+                model=attack_run["config"]["model"],
+                dataset=attack_run["config"]["dataset"],
+                attack=attack_run["config"]["attack"],
+                model_params=OmegaConf.structured(attack_run["config"]["model_params"]),
+                dataset_params=OmegaConf.structured(attack_run["config"]["dataset_params"]),
+                attack_params=OmegaConf.structured(attack_run["config"]["attack_params"]),
+            )
+            run_config = filter_config(run_config, -1)
+            if run_config is None:
+                continue
+            model_params = run_config.model_params
             if model_params != last_model_params:
                 pbar.set_description(f"Loading new model and tokenizer {model_params}")
                 last_model_params = model_params
@@ -240,8 +239,6 @@ def main(cfg: DictConfig) -> None:
         except Exception as e:
             logging.error(f"Error in {path}. Original exception: {e}")
             raise Exception(f"Error in {path}. Original exception: {e}") from e
-
-
 
 
 if __name__ == "__main__":

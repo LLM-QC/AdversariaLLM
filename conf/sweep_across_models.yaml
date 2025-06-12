@@ -10,7 +10,7 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      model_name: google/gemma-2-2b-it, mistralai/Mistral-7B-Instruct-v0.3, meta-llama/Meta-Llama-3.1-8B-Instruct, qwen/Qwen2-7B-Instruct, HuggingFaceH4/zephyr-7b-beta, meta-llama/Llama-2-7b-chat-hf, ContinuousAT/Llama-2-7B-CAT,ContinuousAT/Zephyr-CAT,ContinuousAT/Phi-CAT, microsoft/Phi-3-mini-4k-instruct, cais/zephyr_7b_r2d2, GraySwanAI/Llama-3-8B-Instruct-RR, GraySwanAI/Mistral-7B-Instruct-RR
+      model: google/gemma-2-2b-it, mistralai/Mistral-7B-Instruct-v0.3, meta-llama/Meta-Llama-3.1-8B-Instruct, qwen/Qwen2-7B-Instruct, HuggingFaceH4/zephyr-7b-beta, meta-llama/Llama-2-7b-chat-hf, ContinuousAT/Llama-2-7B-CAT,ContinuousAT/Zephyr-CAT,ContinuousAT/Phi-CAT, microsoft/Phi-3-mini-4k-instruct, cais/zephyr_7b_r2d2, GraySwanAI/Llama-3-8B-Instruct-RR, GraySwanAI/Mistral-7B-Instruct-RR
       datasets.adv_behaviors.idx: range(0, 300)
   run:
     dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
@@ -24,6 +24,6 @@ name: testing
 save_dir: ${root_dir}/outputs/
 
 # overrides for parallelism
-attack_name: null
-dataset_name: null
-model_name: null
+attack: null
+dataset: null
+model: null

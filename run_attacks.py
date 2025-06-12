@@ -28,21 +28,23 @@ def select_configs(cfg: DictConfig, name: str | ListConfig | None) -> list[tuple
 
 
 def collect_configs(cfg: DictConfig) -> list[RunConfig]:
-    models_to_run = select_configs(cfg.models, cfg.model_name)
-    datasets_to_run = select_configs(cfg.datasets, cfg.dataset_name)
-    attacks_to_run = select_configs(cfg.attacks, cfg.attack_name)
+    if hasattr(cfg, 'model_name') or hasattr(cfg, 'dataset_name') or hasattr(cfg, 'attack_name'):
+        raise ValueError("model_name, dataset_name, and attack_name are deprecated. Use model, dataset, and attack instead.")
+    models_to_run = select_configs(cfg.models, cfg.model)
+    datasets_to_run = select_configs(cfg.datasets, cfg.dataset)
+    attacks_to_run = select_configs(cfg.attacks, cfg.attack)
 
     all_run_configs = []
-    for model_name, model_params in models_to_run:
-        for dataset_name, dataset_params in datasets_to_run:
-            temp_dataset = PromptDataset.from_name(dataset_name)(dataset_params)
+    for model, model_params in models_to_run:
+        for dataset, dataset_params in datasets_to_run:
+            temp_dataset = PromptDataset.from_name(dataset)(dataset_params)
             dset_len = len(temp_dataset)
             dataset_params["idx"] = temp_dataset.config_idx
-            for attack_name, attack_params in attacks_to_run:
+            for attack, attack_params in attacks_to_run:
                 run_config = RunConfig(
-                    model_name,
-                    dataset_name,
-                    attack_name,
+                    model,
+                    dataset,
+                    attack,
                     model_params,
                     dataset_params,
                     attack_params,
