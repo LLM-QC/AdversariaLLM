@@ -386,12 +386,8 @@ def generate_ragged(
                     still_active = (~finished & ~finished_at_this_step)[~finished].cpu()
 
                     for j in range(len(past_key_values.key_cache)):
-                        if not is_gemma:
-                            past_key_values.key_cache[j] = past_key_values.key_cache[j][still_active]
-                            past_key_values.value_cache[j] = past_key_values.value_cache[j][still_active]
-                        else:
-                            past_key_values.key_cache[j] = past_key_values.key_cache[j][still_active]
-                            past_key_values.value_cache[j] = past_key_values.value_cache[j][still_active]
+                        past_key_values.key_cache[j] = past_key_values.key_cache[j][still_active]
+                        past_key_values.value_cache[j] = past_key_values.value_cache[j][still_active]
 
                     finished |= finished_at_this_step
                     if finished.all():

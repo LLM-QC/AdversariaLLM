@@ -10,18 +10,19 @@
 Implementation adapted from https://github.com/dreadnode/research/blob/main/notebooks/Mistral%20-%20BEAST%20Beam%20Attack.ipynb
 """
 
+import copy
+import sys
 import time
 from dataclasses import dataclass, field
 from functools import partial
-import copy
+
 import torch
 from tqdm import trange
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.lm_utils import (generate_ragged_batched, get_disallowed_ids,
-                          with_max_batchsize, prepare_conversation, get_flops)
-
-from src.attacks.attack import Attack, AttackResult, GenerationConfig, SingleAttackRunResult, AttackStepResult
+from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult)
+from src.lm_utils import (generate_ragged_batched, get_disallowed_ids, get_flops,
+                          prepare_conversation, with_max_batchsize)
 from src.types import Conversation
 
 
@@ -120,7 +121,7 @@ class BEASTAttack(Attack):
             per_sample_losses = [torch.log(torch.tensor(initial_ppl)).item()]
             per_sample_flops = [flops]
             beams: list[torch.LongTensor] = [torch.LongTensor([]) for b in beams]
-            for i in (pbar := trange(1, self.config.num_steps)):
+            for i in (pbar := trange(1, self.config.num_steps, file=sys.stdout)):
                 flops = 0
                 t1 = time.time()
                 # Get next K1 x K2 candidates
