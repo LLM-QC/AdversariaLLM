@@ -82,6 +82,9 @@ def load_model_and_tokenizer(model_params):
         case path if "llama-2" in path:
             tokenizer.pad_token = tokenizer.unk_token
             tokenizer.model_max_length = 4096
+        case path if "llama2" in path:
+            tokenizer.pad_token = tokenizer.unk_token
+            tokenizer.model_max_length = 4096
         case path if "meta-llama/meta-llama-3-8b-instruct" in path:
             tokenizer.model_max_length = 8192
             tokenizer.eos_token_id = 128009  # want to use <|eot_id|> instead of <|eos_id|>  (https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct/discussions/4)
