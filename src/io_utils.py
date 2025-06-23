@@ -605,3 +605,20 @@ def cached_json_load(path):
 def num_model_params(id: str) -> int:
     model = AutoModelForCausalLM.from_pretrained(id, device_map="cpu")
     return model.num_parameters(exclude_embeddings=True)
+
+
+def load_embedding(path):
+    """
+    Load an embedding from a file.
+
+    Args:
+        path (str): Path to the embedding file.
+
+    Returns:
+        np.ndarray: The loaded embedding.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Embedding file not found: {path}")
+    
+    # Load the embedding from the file
+    return safetensors.torch.load_file(path, device="cpu")["embeddings"]
