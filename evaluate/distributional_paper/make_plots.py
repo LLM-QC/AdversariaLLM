@@ -141,7 +141,6 @@ def fetch_data(model: str, attack: str, attack_params: dict, dataset_idx: list[i
     paths = get_filtered_and_grouped_paths(filter_by, group_by)
 
     results = collect_results(paths, infer_sampling_flops=True)
-    print(group_by, filter_by, len(paths), len(results))
     assert len(results) == 1, f"Should only have exactly one type of result, got {len(results)}, {list(results.keys())}"
     return list(results.values())[0]
 
@@ -1187,7 +1186,6 @@ def ridge_plot(
         for value in step_data:
             ridge_data.append({'step': f'Step {step_idx}', 'p_harmful': value})
     df = pd.DataFrame(ridge_data)
-    print(df)
 
     # Create ridge plot for p_harmful distributions across steps
     unique_steps = sorted(df['step'].unique(), key=lambda x: int(x.split()[1]))
@@ -1535,16 +1533,16 @@ FLOPS_PER_STEP = {
 
 # Attack-specific configuration -----------------------------------------------------
 ATTACKS = [
-    # ("pair", dict(
-    #     title_suffix="PAIR",
-    #     cumulative=True,
-    #     sample_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 50, "temperature": 0.7},
-    #     },
-    #     baseline_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
-    #     },
-    # )),
+    ("pair", dict(
+        title_suffix="PAIR",
+        cumulative=True,
+        sample_params=lambda: {
+            "generation_config": {"num_return_sequences": 50, "temperature": 0.7},
+        },
+        baseline_params=lambda: {
+            "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
+        },
+    )),
     ("beast", dict(
         title_suffix="BEAST",
         cumulative=False,
@@ -1555,119 +1553,119 @@ ATTACKS = [
             "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
         },
     )),
-    # ("autodan", dict(
-    #     title_suffix="AutoDAN",
-    #     cumulative=False,
-    #     sample_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 50, "temperature": 0.7},
-    #         "early_stopping_threshold": 0,
-    #     },
-    #     baseline_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
-    #     },
-    # )),
-    # ("gcg", dict(
-    #     title_suffix="GCG",
-    #     cumulative=False,
-    #     sample_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 50, "temperature": 0.7},
-    #         "num_steps": 250,
-    #         "loss": "ce",
-    #         "token_selection": "default",
-    #         "use_prefix_cache": True,
-    #     },
-    #     baseline_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
-    #         "num_steps": 250,
-    #         "loss": "ce",
-    #         "token_selection": "default",
-    #         "use_prefix_cache": True,
-    #     },
-    # )),
-    # ("gcg", dict(
-    #     title_suffix="GCG 500",
-    #     cumulative=False,
-    #     sample_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 500, "temperature": 0.7},
-    #         "num_steps": 250,
-    #         "loss": "ce",
-    #         "token_selection": "default",
-    #         "use_prefix_cache": True,
-    #     },
-    #     baseline_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
-    #         "num_steps": 250,
-    #         "loss": "ce",
-    #         "token_selection": "default",
-    #         "use_prefix_cache": True,
-    #     },
-    # )),
-    # ("gcg", dict(
-    #     title_suffix="GCG Entropy Loss",
-    #     cumulative=False,
-    #     sample_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 50, "temperature": 0.7},
-    #         "num_steps": 250,
-    #         "loss": "entropy_adaptive",
-    #         "token_selection": "default",
-    #         "use_prefix_cache": True,
-    #     },
-    #     baseline_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
-    #         "num_steps": 250,
-    #         "loss": "ce",
-    #         "token_selection": "default",
-    #         "use_prefix_cache": True,
-    #     },
-    # )),
-    # ("bon", dict(
-    #     title_suffix="BoN",
-    #     cumulative=False,
-    #     sample_params=lambda: {"num_steps": 1000, "generation_config": {"temperature": 0.7}},
-    #     baseline_params=lambda: {
-    #         # BoN's baseline is *Direct* with one deterministic sample
-    #         "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
-    #     },
-    #     baseline_attack="direct",
-    #     postprocess=lambda data, metric: data.__setitem__(
-    #         metric, np.array(data[metric]).transpose(0, 2, 1)
-    #     ),
-    # )),
-    # ("bon", dict(
-    #     title_suffix="BoN Repro",
-    #     cumulative=False,
-    #     sample_params=lambda: {"num_steps": 1000, "generation_config": {"temperature": 1.0}},
-    #     baseline_params=lambda: {
-    #         # BoN's baseline is *Direct* with one deterministic sample
-    #         "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
-    #     },
-    #     baseline_attack="direct",
-    #     postprocess=lambda data, metric: data.__setitem__(
-    #         metric, np.array(data[metric]).transpose(0, 2, 1)
-    #     ),
-    # )),
-    # ("direct", dict(
-    #     title_suffix="Direct",
-    #     cumulative=True,
-    #     sample_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 1000, "temperature": 0.7},
-    #     },
-    #     baseline_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
-    #     },
-    #     skip_if_empty=True,  # gracefully continue if no paths were found
-    # )),
-    # ("direct", dict(
-    #     title_suffix="Direct temp 1.0",
-    #     cumulative=True,
-    #     sample_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 1000, "temperature": 1.0},
-    #     },
-    #     baseline_params=lambda: {
-    #         "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
-    #     },
-    #     skip_if_empty=True,  # gracefully continue if no paths were found
-    # )),
+    ("autodan", dict(
+        title_suffix="AutoDAN",
+        cumulative=False,
+        sample_params=lambda: {
+            "generation_config": {"num_return_sequences": 50, "temperature": 0.7},
+            "early_stopping_threshold": 0,
+        },
+        baseline_params=lambda: {
+            "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
+        },
+    )),
+    ("gcg", dict(
+        title_suffix="GCG",
+        cumulative=False,
+        sample_params=lambda: {
+            "generation_config": {"num_return_sequences": 50, "temperature": 0.7},
+            "num_steps": 250,
+            "loss": "ce",
+            "token_selection": "default",
+            "use_prefix_cache": True,
+        },
+        baseline_params=lambda: {
+            "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
+            "num_steps": 250,
+            "loss": "ce",
+            "token_selection": "default",
+            "use_prefix_cache": True,
+        },
+    )),
+    ("gcg", dict(
+        title_suffix="GCG 500",
+        cumulative=False,
+        sample_params=lambda: {
+            "generation_config": {"num_return_sequences": 500, "temperature": 0.7},
+            "num_steps": 250,
+            "loss": "ce",
+            "token_selection": "default",
+            "use_prefix_cache": True,
+        },
+        baseline_params=lambda: {
+            "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
+            "num_steps": 250,
+            "loss": "ce",
+            "token_selection": "default",
+            "use_prefix_cache": True,
+        },
+    )),
+    ("gcg", dict(
+        title_suffix="GCG Entropy Loss",
+        cumulative=False,
+        sample_params=lambda: {
+            "generation_config": {"num_return_sequences": 50, "temperature": 0.7},
+            "num_steps": 250,
+            "loss": "entropy_adaptive",
+            "token_selection": "default",
+            "use_prefix_cache": True,
+        },
+        baseline_params=lambda: {
+            "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
+            "num_steps": 250,
+            "loss": "ce",
+            "token_selection": "default",
+            "use_prefix_cache": True,
+        },
+    )),
+    ("bon", dict(
+        title_suffix="BoN",
+        cumulative=False,
+        sample_params=lambda: {"num_steps": 1000, "generation_config": {"temperature": 0.7}},
+        baseline_params=lambda: {
+            # BoN's baseline is *Direct* with one deterministic sample
+            "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
+        },
+        baseline_attack="direct",
+        postprocess=lambda data, metric: data.__setitem__(
+            metric, np.array(data[metric]).transpose(0, 2, 1)
+        ),
+    )),
+    ("bon", dict(
+        title_suffix="BoN Repro",
+        cumulative=False,
+        sample_params=lambda: {"num_steps": 1000, "generation_config": {"temperature": 1.0}},
+        baseline_params=lambda: {
+            # BoN's baseline is *Direct* with one deterministic sample
+            "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
+        },
+        baseline_attack="direct",
+        postprocess=lambda data, metric: data.__setitem__(
+            metric, np.array(data[metric]).transpose(0, 2, 1)
+        ),
+    )),
+    ("direct", dict(
+        title_suffix="Direct",
+        cumulative=True,
+        sample_params=lambda: {
+            "generation_config": {"num_return_sequences": 1000, "temperature": 0.7},
+        },
+        baseline_params=lambda: {
+            "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
+        },
+        skip_if_empty=True,  # gracefully continue if no paths were found
+    )),
+    ("direct", dict(
+        title_suffix="Direct temp 1.0",
+        cumulative=True,
+        sample_params=lambda: {
+            "generation_config": {"num_return_sequences": 1000, "temperature": 1.0},
+        },
+        baseline_params=lambda: {
+            "generation_config": {"num_return_sequences": 1, "temperature": 0.0},
+        },
+        skip_if_empty=True,  # gracefully continue if no paths were found
+    )),
 ]
 
 METRIC = ("scores", "strong_reject", "p_harmful")
