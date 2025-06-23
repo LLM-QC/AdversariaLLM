@@ -55,6 +55,7 @@ class PGDConfig:
     attack_space: str = "embedding"
     random_restart_interval: int = 0
     random_restart_epsilon: float = 0.1
+    log_embeddings: bool = False
 
 
 class PGDAttack(Attack):
@@ -251,7 +252,7 @@ class PGDAttack(Attack):
                 perturbed_embeddings_or_one_hot = self._perform_optimizer_step(
                     optimizer,perturbed_embeddings_or_one_hot, original_embeddings, grad, attack_masks_batch, step
                 )
-            
+
             model.zero_grad()
             pbar.set_postfix({"loss": loss.mean().item(), "kl_div": kl_div_loss.item() if isinstance(kl_div_loss, torch.Tensor) else kl_div_loss})
             if original_model is not None:
@@ -300,14 +301,19 @@ class PGDAttack(Attack):
              # Create step results, but only the last one has meaningful completions here
              steps = []
              for step in range(self.config.num_steps):
-                 steps.append(AttackStepResult(
+                if self.config.log_embeddings:
+                     model_input_embeddings = batch_perturbed_embeddings_list[i][step].cpu()
+                else:
+                    model_input_embeddings = None
+                steps.append(AttackStepResult(
                      step=step,
                      model_completions=outputs[i * self.config.num_steps + step],
                      time_taken=batch_times[i][step],
                      loss=batch_losses[i][step],
+                     model_input_embeddings=model_input_embeddings,
+                     model_input=original_conversations_batch[i],
                  ))
              input_conversation = original_conversations_batch[i]
-             input_conversation[-1]["content"] = ""
              runs.append(SingleAttackRunResult(
                  original_prompt=input_conversation,
                  steps=steps,
@@ -326,6 +332,8 @@ class PGDAttack(Attack):
             return self._calculate_ce_loss(logits, targets, mask)
         elif self.config.loss == "entropy_adaptive":
             return self._calculate_entropy_adaptive_loss(logits, mask)
+        elif self.config.loss == "entropy_first_token":
+            return self._calculate_entropy_first_token_loss(logits, mask)
         else:
             raise ValueError(f"Unknown loss {self.config.loss}")
 
@@ -384,6 +392,38 @@ class PGDAttack(Attack):
         # ---- entropy on the rest of the tokens (certainty) --------------------
         rest_entropy = (entropy * ((cum_mask > 1) & (mask == 1))).sum(dim=1) / (mask.sum(dim=1).float() - 1)
         loss = first_token_loss + under_confident * rest_entropy  # (B,)
+        return loss
+
+    def _calculate_entropy_first_token_loss(self,
+                                logits: torch.Tensor,
+                                mask:   torch.Tensor,
+                                adaptive_threshold: float = 0.7) -> torch.Tensor:
+        """
+        * maximise entropy of the **first** token (→ encourage diverse samples)
+        * once we are getting diverse samples (max p < `adaptive_threshold`) we also
+        minimise entropy on the remaining tokens (→ encourage coherence)
+
+        Args
+        ----
+        logits : (B, L, V)  un-normalised logits
+        mask   : (B, L)     1 = real token, 0 = padding
+        adaptive_threshold : float
+            confidence level that triggers the “low-entropy after the first
+            token” term (defaults to 0.7)
+
+        Returns
+        -------
+        loss : (B,)   one scalar per sequence in the batch
+        """
+        # ---- probabilities & entropy -----------------------------------------
+        log_probs = F.log_softmax(logits, dim=-1)  # (B, L, D)
+        probs = log_probs.exp()  # (B, L, D)
+        entropy = -(probs * log_probs).sum(dim=-1)  # (B, L)
+
+        # ---- first-token (exploration) term -----------------------------------
+        cum_mask = mask.float().cumsum(dim=1)
+        first_token_loss = - (entropy * (cum_mask == 1)).sum(dim=1)
+        loss = first_token_loss
         return loss
 
     def _setup_benign_reference(self, model, tokenizer, batch_size, device):

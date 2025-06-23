@@ -262,6 +262,7 @@ pgd:
     betas: [0.9, 0.999]
   random_restart_interval: 40
   random_restart_epsilon: 0.1
+  log_embeddings: true
 pgd_discrete:
   name: pgd_discrete
   type: hybrid

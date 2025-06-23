@@ -53,7 +53,7 @@ def collect_configs(cfg: DictConfig) -> list[RunConfig]:
     return all_run_configs
 
 
-def run_attacks(all_run_configs: list[RunConfig], save_dir: str, date_time_string: str) -> None:
+def run_attacks(all_run_configs: list[RunConfig], cfg: DictConfig, date_time_string: str) -> None:
     last_model = None
     last_dataset = None
     last_attack = None
@@ -73,7 +73,7 @@ def run_attacks(all_run_configs: list[RunConfig], save_dir: str, date_time_strin
         attack = Attack.from_name(run_config.attack)(run_config.attack_params)
         results = attack.run(model, tokenizer, dataset)
 
-        log_attack(run_config, results, save_dir, date_time_string)
+        log_attack(run_config, results, cfg, date_time_string)
 
 
 @hydra.main(config_path="./conf", config_name="config", version_base="1.3")
@@ -93,7 +93,7 @@ def main(cfg: DictConfig) -> None:
     all_run_configs = collect_configs(cfg)
 
     # 2. Run the attacks
-    run_attacks(all_run_configs, cfg.save_dir, date_time_string)
+    run_attacks(all_run_configs, cfg, date_time_string)
 
     # 3. Run the judges
     if judges_to_run is None:

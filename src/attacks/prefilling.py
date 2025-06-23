@@ -33,11 +33,13 @@ class PrefillingAttack(Attack):
     ) -> AttackResult:
         t_start = time.time()
         token_list = []
+        original_conversations = []
         # 1. Prepare inputs
         for conversation in dataset:
             toks = prepare_conversation(tokenizer, conversation)
             toks_flat = [t for turn_toks in toks for t in turn_toks]
             token_list.append(torch.cat(toks_flat))
+            original_conversations.append(conversation)
 
         completions = generate_ragged_batched(
             model,
@@ -59,7 +61,7 @@ class PrefillingAttack(Attack):
             for j in range(len(completions_i)):
                 completions_i[j] = dataset[i][-1]["content"] + completions_i[j]
             run = SingleAttackRunResult(
-                original_prompt=dataset[i],
+                original_prompt=original_conversations[i],
                 steps=[
                     AttackStepResult(
                         step=0,

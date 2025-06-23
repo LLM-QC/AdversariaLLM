@@ -3,6 +3,8 @@ flash-attn
 hydra-core >=1.3.0
 hydra-submitit-launcher
 jailbreakbench
+json5>=0.12.0
+lm-format-enforcer>=0.10.11
 matplotlib
 omegaconf >=2.1.0
 orjson

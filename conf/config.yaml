@@ -16,6 +16,7 @@ hydra:
 
 name: testing
 save_dir: ${root_dir}/outputs/
+embed_dir: ${root_dir}/embeddings/
 overwrite: false
 
 classifiers: ["strong_reject"] # Options: "strong_reject", "cais", "llama_guard_3_8b", "overrefusal", etc. (can be list[str]|null)

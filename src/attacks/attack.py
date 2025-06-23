@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from abc import abstractmethod
+from typing import Union
 
+from torch import Tensor
 import transformers
 from beartype import beartype
 from beartype.typing import Literal, Optional, Generic, TypeVar
@@ -52,12 +54,17 @@ class AttackStepResult:
     # Actual unrolled input tokens (i.e. including the system prompt, if present)
     model_input_tokens: Optional[list[int]] = None
 
+    model_input_embeddings: Optional[Union[Tensor, str]] = None
+
 
 @beartype
 @dataclass
 class SingleAttackRunResult:
     """Stores the results of running a single attack on a single conversation."""
     # The original multi-turn conversation from the dataset
+    # We include the target response (usually `Sure, here's how to...`) as the
+    # assistant message in the original conversation to make it easier to reproduce
+    # results in the future.
     original_prompt: Conversation
 
     # Results for each step of the attack

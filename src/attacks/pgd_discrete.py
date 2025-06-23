@@ -83,20 +83,20 @@ class PGDDiscreteAttack(Attack):
         all_conversations = []
 
         for conversation in dataset:
+            all_conversations.append(conversation)
             try:
-                tokens, attack_mask, target_mask, attack_conversation = self._prepare_single_conversation(
+                tokens, attack_mask, target_mask = self._prepare_single_conversation(
                     conversation, tokenizer, self.config.optim_str_init
                 )
             except TokenMergeError:
                 logging.warning("TokenMergeError encountered, retrying with added space.")
-                tokens, attack_mask, target_mask, attack_conversation = self._prepare_single_conversation(
+                tokens, attack_mask, target_mask = self._prepare_single_conversation(
                     conversation, tokenizer, " " + self.config.optim_str_init
                 )
 
             all_tokens.append(tokens)
             all_attack_masks.append(attack_mask)
             all_target_masks.append(target_mask)
-            all_conversations.append(attack_conversation)
 
         all_tokens = pad_sequence(all_tokens, batch_first=True, padding_value=tokenizer.pad_token_id)
         all_target_masks = pad_sequence(all_target_masks, batch_first=True)
@@ -117,6 +117,7 @@ class PGDDiscreteAttack(Attack):
             ]
         elif self.config.placement == "prompt":
             attack_conversation = copy.deepcopy(conversation)
+            conversation = copy.deepcopy(conversation)
             conversation[0]["content"] = ""
         else:
             raise ValueError(f"Invalid placement: {self.config.placement}")
@@ -137,7 +138,7 @@ class PGDDiscreteAttack(Attack):
         target_mask = target_mask.roll(-1, 0)
         target_mask[-1] = False
 
-        return tokens, attack_mask.long(), target_mask.long(), attack_conversation
+        return tokens, attack_mask.long(), target_mask.long()
 
     def _initialize_optimizer(self, params):
         if self.config.optimizer == "Adam":
@@ -429,8 +430,6 @@ class PGDDiscreteAttack(Attack):
                     loss=batch_losses_one_hot[i][step_idx], # Discrete loss
                     continuous_loss=batch_losses[i][step_idx], # Continuous loss
                 ))
-            input_conversation = original_conversations_batch[i]
-            input_conversation[-1]["content"] = ""
             runs.append(SingleAttackRunResult(
                 original_prompt=original_conversations_batch[i],
                 steps=steps,

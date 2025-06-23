@@ -1,4 +1,5 @@
 import gc
+import hashlib
 import json
 import logging
 import os
@@ -8,7 +9,7 @@ from functools import lru_cache
 
 import orjson
 import torch
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from pymongo import MongoClient
 from pymongo.synchronous.database import Database
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -252,7 +253,29 @@ class RunConfig:
     attack_params: dict
 
 
-def log_attack(run_config: RunConfig, result: AttackResult, save_dir: str, date_time_string: str):
+def offload_tensors(cfg: DictConfig, result: AttackResult):
+    """Offload tensors from the AttackResult to separate .safetensors"""
+    assert cfg.embed_dir is not None, "cfg.embed_dir must be set to offload tensors"
+    if not os.path.exists(cfg.embed_dir):
+        os.makedirs(cfg.embed_dir, exist_ok=True)
+    
+    for i, run in enumerate(result.runs):
+        for j, step in enumerate(run.steps):
+            if step.model_input_embeddings is not None:
+                run_hash = hashlib.sha256(f"{run.original_prompt} {step.model_completions}, {step.step}".encode()).hexdigest()
+                filename = f"{run_hash}.safetensors"
+                embed_path = os.path.join(cfg.embed_dir, filename)
+                import safetensors.torch
+                safetensors.torch.save_file({"embeddings": step.model_input_embeddings}, embed_path)
+                logging.info(f"Saved embeddings for run {i}, step {j} to {embed_path}")
+                step.model_input_embeddings = embed_path
+
+def log_attack(run_config: RunConfig, result: AttackResult, cfg: DictConfig, date_time_string: str):
+    """Logs the attack results to a JSON file and MongoDB."""
+
+    offload_tensors(cfg, result)
+
+    save_dir = cfg.save_dir
     # Create a structured log message as a JSON object
     OmegaConf.resolve(run_config.attack_params)
     OmegaConf.resolve(run_config.dataset_params)
@@ -589,3 +612,20 @@ def cached_json_load(path):
 def num_model_params(id: str) -> int:
     model = AutoModelForCausalLM.from_pretrained(id, device_map="cpu")
     return model.num_parameters(exclude_embeddings=True)
+
+
+def load_embedding(path):
+    """
+    Load an embedding from a file.
+
+    Args:
+        path (str): Path to the embedding file.
+
+    Returns:
+        np.ndarray: The loaded embedding.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Embedding file not found: {path}")
+    
+    # Load the embedding from the file
+    return safetensors.torch.load_file(path, device="cpu")["embeddings"]

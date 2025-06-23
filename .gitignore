@@ -12,3 +12,4 @@ cache
 viz
 wandb
 paths.yaml
+embeddings/

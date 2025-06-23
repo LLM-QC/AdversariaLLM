@@ -1,9 +1,9 @@
-"""Cleaned‑up random‑search attack
+"""Cleaned-up random search attack
 
-Adds explicit hyper‑parameters
-  • `neighborhood_radius`   – max token flips per neighbour
-  • `num_steps`             – evaluation budget / generations
-  • `candidates_per_generation` – neighbours evaluated *in parallel* each generation
+Adds explicit hyper-parameters
+  • `neighborhood_radius`    - max token flips per neighbour
+  • `num_steps`              - evaluation budget / generations
+  • `candidates_per_generation`  - neighbours evaluated *in parallel* each generation
 
 This revision parallelises candidate evaluation with the `with_max_batchsize` helper so GPU/TPU capacity is saturated regardless of how many neighbours you ask for.
 """
@@ -227,9 +227,8 @@ class RandomSearchAttack(Attack):
             for i in range(num_examples):
                 atk_tokens = best_seq[i, mut_idx[i]]
                 atk_str = tokenizer.decode(atk_tokens, skip_special_tokens=False)
-                orig = original_convs_batch[i]
                 user_content = (
-                    orig[0]["content"] + atk_str
+                    original_convs_batch[i][0]["content"] + atk_str
                     if self.config.placement == "suffix"
                     else atk_str
                 )

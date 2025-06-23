@@ -79,6 +79,7 @@ class BEASTAttack(Attack):
         for conversation in dataset:
             t0 = time.time()
             assert len(conversation) == 2, "Currently BEAST only supports single-turn conversations"
+            prompts.append(conversation)
             attack: Conversation = [
                 {"role": "user", "content": conversation[0]["content"] + self.config.optim_str_init},
                 {"role": "assistant", "content": conversation[1]["content"]}
@@ -88,7 +89,6 @@ class BEASTAttack(Attack):
                 conversation,
                 attack,
             )[0]
-            prompts.append(conversation)
 
             # Compute KV cache for prefix tokens
             if self.config.use_prefix_cache and "gemma" not in model.name_or_path:
