@@ -26,4 +26,4 @@ rf_test:
   seed: 0
   idx: null
   batch: null
-  path: null
+  path: ${oc.env:HOME}/harmful-harmless-eval/

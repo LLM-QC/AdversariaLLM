@@ -59,6 +59,7 @@ def main(cfg: DictConfig) -> None:
         log_file_path = os.path.join(cfg.save_dir, f"{date_time_string}/run.json")
     else:
         log_file_path = cfg.log_file_path
+    OmegaConf.resolve(cfg)
     validate_cfg(cfg)
 
     if cfg.hf_offline_mode:

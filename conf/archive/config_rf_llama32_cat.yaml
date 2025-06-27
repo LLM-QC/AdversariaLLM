@@ -10,7 +10,7 @@ hydra:
   # mode: MULTIRUN
   sweeper:
     params:
-      datasets.rf_test.idx: "range(0,160,step=10)"
+      datasets.rf_test.idx: "range(0,160,step=20)"
   run:
     dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
   job:
@@ -18,10 +18,10 @@ hydra:
   sweep:
     dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
 
-name: RF_llama3-2-cat
+name: llama3-2-cat
 root_dir: ${oc.env:PWD}
 save_dir: ${root_dir}/outputs/rf_test
-log_file_path: ${save_dir}/redflag_llama3-2/${attack_name}/run-${datasets.rf_test.idx}__${now:%H-%M-%S}.json 
+log_file_path: ${save_dir}/${name}/${attack_name}/run-${datasets.rf_test.idx}__${now:%H-%M-%S}.json 
 
 log_toks_strs: True
 hf_offline_mode: True
