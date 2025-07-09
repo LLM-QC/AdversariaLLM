@@ -1654,7 +1654,11 @@ class HFLocalTextGen(TextGenerator):
 class APITextGen(TextGenerator):
     """
     API-based text generation using various models. Note that not all models support all parameters. This class is mainly tailored and tested with OpenAI models.
+
+    TODO: Change this to a cleaner and more general API integration, as this one is a minimal implementation inspired by
+    https://github.com/AI45Lab/ActorAttack/tree/master focused on the OpenAI API.
     """
+
 
     def __init__(self, model_name: str, default_generate_kwargs: Optional[dict[str, Any]] = None):
         self.CALL_SLEEP = 1
