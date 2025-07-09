@@ -22,12 +22,11 @@ from src.io_utils import free_vram
 from src.types import Conversation, JsonSchema
 
 
-
 @torch.no_grad()
 def generate_ragged_batched(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
-    token_list: list[torch.IntTensor] | None = None,
+    token_list: list[torch.LongTensor] | None = None,
     embedding_list: list[torch.FloatTensor] | None = None,
     initial_batch_size: int | None = None,
     use_cache: bool = True,
@@ -177,7 +176,7 @@ def generate_ragged(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
     embedding_list: list[torch.FloatTensor] | None = None,
-    token_list: list[torch.IntTensor] | None = None,
+    token_list: list[torch.LongTensor] | None = None,
     max_new_tokens: int = 256,
     return_tokens: bool = False,
     padding_side: Literal["left", "right"] = "right",
@@ -1633,7 +1632,7 @@ class HFLocalTextGen(TextGenerator):
 
         return GenerationResult(gen=output, input_ids=[tokens.cpu().squeeze(0).tolist() for tokens in token_list])
 
-    def _batch_tokenize(self, convs: list[Conversation]) -> list[torch.IntTensor]:
+    def _batch_tokenize(self, convs: list[Conversation]) -> list[torch.LongTensor]:
         token_list = []
         for conv in convs:
             next_tokens = self._tokenize(conv)
@@ -1641,7 +1640,7 @@ class HFLocalTextGen(TextGenerator):
 
         return token_list
 
-    def _tokenize(self, conv: Conversation) -> list[torch.IntTensor]:
+    def _tokenize(self, conv: Conversation) -> list[torch.LongTensor]:
         conv = copy.deepcopy(conv)
         if conv[-1]["role"] == "user":
             conv.append({"role": "assistant", "content": ""})
@@ -1649,7 +1648,7 @@ class HFLocalTextGen(TextGenerator):
         parts_list = [torch.cat(parts) for parts in parts_list]
         token_ids = torch.cat(parts_list, dim=0)
 
-        return [token_ids.int()]
+        return [token_ids]
 
 
 class APITextGen(TextGenerator):
