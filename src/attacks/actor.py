@@ -139,7 +139,8 @@ class ActorAttack(Attack[ActorAttackResult]):
                     target_model_holder=self.config.judge_model.target_model_holder,
                 )
 
-        org_queries = [msg["content"] for msg, _ in dataset]
+        data = [d for d in dataset]
+        org_queries = [msg["content"] for msg, _ in data]
         attack_strats = self.generate_attack_strats(attack_model, org_queries)
         logging.info(f"Generated attack strats for {len(org_queries)} harmful queries")
 
@@ -151,7 +152,7 @@ class ActorAttack(Attack[ActorAttackResult]):
         best_attempt_indices = self.get_best_indices(dialog_hists_list)
 
         runs = self.create_attack_run_results(
-            org_queries=org_queries,
+            data=data,
             initial_attack=attack_strats,
             samples_list=samples_list,
             best_attempt_indices=best_attempt_indices,
@@ -821,19 +822,19 @@ class ActorAttack(Attack[ActorAttackResult]):
 
     def create_attack_run_results(
         self,
-        org_queries: list[str],
+        data: list[Conversation],
         initial_attack: dict,
         samples_list: list[list[list[AttackStepResult]]],
         best_attempt_indices: list[int],
     ) -> list[ActorSingleAttackRunResult]:
         run_results = []
-        for sample_idx, org_query in enumerate(org_queries):
+        for sample_idx, data_conv in enumerate(data):
             steps_list = samples_list[sample_idx]
             best_attempt_idx = best_attempt_indices[sample_idx]
 
             run_results.append(
                 ActorSingleAttackRunResult(
-                    original_prompt=[{"role": "user", "content": org_query}, {"role": "assistant", "content": ""}],
+                    original_prompt=[{"role": "user", "content": data_conv[0]["content"]}, {"role": "assistant", "content": data_conv[1]["content"]}],
                     steps=steps_list[best_attempt_idx],
                     harm_target=initial_attack["harm_targets"][sample_idx],
                     query_details=QueryDetails(**initial_attack["query_details_list"][sample_idx]),
