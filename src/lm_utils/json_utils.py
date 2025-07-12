@@ -31,6 +31,77 @@ class JSONFilter:
       1. enforces JSON schema with lm-format-enforcer
       2. suppresses leading whitespace
       3. limits runs of whitespace-only tokens to `max_ws_run`
+
+    How to create schemata:
+    # =============================================================================
+    # -----------------------------------------------------------------------------
+    # Think of a Schema as “JSON that describes another JSON.”  The **bare minimum**
+    # looks like this:
+    #     {
+    #       "type": "object",
+    #       "properties": {
+    #         ... one entry per field in your real JSON ...
+    #       }
+    #     }
+    # For *each* nested level you add, include a `"type"` so the validator knows
+    # what to expect (`"object"` for dicts, `"array"` for lists, `"string"`, `"number"`,
+    # `"integer"`, `"boolean"`, `"null"`).  Below are the options you’ll reach for
+    # 90 % of the time.
+    #
+    # ┌──────────────────────────────  TOP-LEVEL OBJECT  ─────────────────────────┐
+    # | "type": "object"                                                           |
+    # | "properties": { <field-name> : <schema>, … }                               |
+    # | "required":   ["fieldA", "fieldB"]            # ← list mandatory keys     |
+    # | "additionalProperties": false                 # ← forbid unknown keys     |
+    # └────────────────────────────────────────────────────────────────────────────┘
+    # ┌───────────────────────────────  ARRAYS / LISTS  ──────────────────────────┐
+    # | "type": "array",                                                          |
+    # | "items":   <schema of ONE element>,                                       |
+    # | "minItems": 1,    "maxItems": 10                                          |
+    # |                                                                           |
+    # | • For a TUPEL of fixed length use "items": [schema1, schema2, …]          |
+    # └────────────────────────────────────────────────────────────────────────────┘
+    # ┌────────────────────────────────  STRINGS  ────────────────────────────────┐
+    # | { "type": "string", "minLength": 1, "maxLength": 200,                    |
+    # |   "pattern": "^[A-Z][a-z]+$",     # regex                                |
+    # |   "enum": ["red","green","blue"]  # fixed vocab                          |
+    # | }                                                                        |
+    # └────────────────────────────────────────────────────────────────────────────┘
+    # ┌───────────────────────────────  NUMBERS  ───────────────────────────────┐
+    # | { "type": "number", "minimum": 0, "maximum": 1 }                        |
+    # | Use "integer" instead of "number" when you need whole numbers.          |
+    # └──────────────────────────────────────────────────────────────────────────┘
+    # ┌────────────────────────────  NULLABLE FIELDS  ───────────────────────────┐
+    # | { "type": ["string", "null"] }            # string *or* null             |
+    # └──────────────────────────────────────────────────────────────────────────┘
+    # ┌─────────────────────────────  EITHER/OR (UNIONS)  ───────────────────────┐
+    # | { "oneOf": [ schemaA, schemaB ] }                                        |
+    # | …or "anyOf"/"allOf" for other logic.                                     |
+    # └──────────────────────────────────────────────────────────────────────────┘
+    #
+    # EXAMPLE – convert real JSON → schema
+    # ------------------------------------
+    # Real JSON we expect:
+    #     {"name":"Ada", "skills":["math","coding"], "age":38}
+    #
+    # Schema:
+    #     {
+    #       "type": "object",
+    #       "additionalProperties": false,
+    #       "properties": {
+    #         "name":   { "type":"string",  "minLength":1 },
+    #         "skills": {
+    #             "type":"array",
+    #             "items": { "type":"string" },
+    #             "minItems":1
+    #         },
+    #         "age":    { "type":"integer", "minimum":0 }
+    #       },
+    #       "required": ["name","skills","age"]
+    #     }
+    #
+    # Feed this dict to forbid_extras() → wrap for OpenAI → done.
+    # =============================================================================
     """
 
     def __init__(
