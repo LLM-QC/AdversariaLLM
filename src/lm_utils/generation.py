@@ -146,9 +146,12 @@ def generate_ragged(
     if token_list is not None:
         assert all(t.ndim == 1 for t in token_list), "Tokens must be 1D."
         token_list = [t.to(model.device) for t in token_list]
-        embedding_list = [
-            model.get_input_embeddings()(t.unsqueeze(0))[0] for t in token_list
-        ]
+        lengths = [t.size(0) for t in token_list]
+        # Concatenate all tokens into a single tensor to get embeddings at once.
+        concatenated_tokens = torch.cat(token_list)
+        concatenated_embeddings = model.get_input_embeddings()(concatenated_tokens)
+        embedding_list = list(torch.split(concatenated_embeddings, lengths))
+
     assert embedding_list is not None
     # TODO: Implement KV-caching for Gemma
     is_gemma = "gemma-2" in model.name_or_path or "gemma-3" in model.config.name_or_path
@@ -174,6 +177,7 @@ def generate_ragged(
         return next_tokens
 
     stop_ids = get_stop_token_ids(model, tokenizer).to(model.device)
+    embedding_layer = model.get_input_embeddings()
     idx_range = torch.arange(B, device=model.device)
     all_tokens = []
     token_filter = JSONFilter(json_schema, tokenizer, B) if json_schema else NullFilter()
@@ -220,7 +224,7 @@ def generate_ragged(
                 logits = token_filter.step(prev_tokens, logits)
                 next_tokens = sample_next_token(logits)
                 padded_embeddings[idx_range, next_token_idx] = (
-                    model.get_input_embeddings()(next_tokens).detach()
+                    embedding_layer(next_tokens).detach()
                 )
                 tokens[:, i] = next_tokens
                 finished |= torch.isin(next_tokens, stop_ids)
@@ -302,7 +306,7 @@ def generate_ragged(
                     prev_tokens.fill_(tokenizer.pad_token_id)
                     prev_tokens[generating] = next_tokens[generating]
 
-                    padded_embeddings[idx_range[generating], next_token_idx.min()] = model.get_input_embeddings()(next_tokens[generating])
+                    padded_embeddings[idx_range[generating], next_token_idx.min()] = embedding_layer(next_tokens[generating])
                     tokens[generating, lengths[generating]] = next_tokens[generating]
                     # have to manually crop the past_key_values to the correct length
                     # since we only add a single step at a time
@@ -328,9 +332,7 @@ def generate_ragged(
                     logits = outputs.logits[torch.arange(B), next_token_idx - 1]
                     logits = token_filter.step(prev_tokens, logits)
                     next_tokens = sample_next_token(logits)
-                    padded_embeddings[idx_range, next_token_idx] = (
-                        model.get_input_embeddings()(next_tokens)
-                    )
+                    padded_embeddings[idx_range, next_token_idx] = embedding_layer(next_tokens)
                     tokens[:, i] = next_tokens
                     finished |= torch.isin(next_tokens, stop_ids)
                     if finished.all():

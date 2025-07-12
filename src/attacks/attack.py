@@ -6,6 +6,7 @@ from torch import Tensor
 import transformers
 from beartype import beartype
 from beartype.typing import Literal, Optional, Generic, TypeVar
+from omegaconf import DictConfig
 
 from src.dataset import PromptDataset
 from src.types import Conversation
@@ -87,12 +88,12 @@ class AttackResult:
 AttRes = TypeVar("AttRes", bound=AttackResult)
 
 class Attack(Generic[AttRes]):
-    def __init__(self, config):
+    def __init__(self, config: DictConfig):
         self.config = config
         transformers.set_seed(config.seed)
 
     @classmethod
-    def from_name(cls, name):
+    def from_name(cls, name: str) -> "Attack":
         match name:
             case "actor":
                 from .actor import ActorAttack
