@@ -6,8 +6,9 @@ batch size adjustment when out-of-memory errors occur.
 """
 
 import sys
-import torch
 from typing import Callable
+
+import torch
 from tqdm import tqdm
 
 from ..io_utils import free_vram
@@ -41,7 +42,7 @@ def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | No
             raise ValueError(f"All inputs must have the same length. Input 0 has length {input_length}, but input {i} has length {len(inp)}")
 
     outputs = []
-    i = 0
+    batch_start = 0
 
     def next_power_of_two(n):
         return 1 << (n - 1).bit_length()
@@ -52,14 +53,14 @@ def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | No
     batch_size = min(initial_batch_size, next_power_of_two(input_length))
     pbar = tqdm(total=input_length, desc=f"Running function b={batch_size}", file=sys.stdout) if verbose else None
 
-    while i < input_length:
+    while batch_start < input_length:
         try:
             free_vram()
             # Create chunks for all inputs
-            chunks = [inp[i:i + batch_size] for inp in inputs]
+            chunks = [inp[batch_start:batch_start + batch_size] for inp in inputs]
             output = function(*chunks)
             outputs.append(output)
-            i += batch_size  # Move to the next batch
+            batch_start += batch_size  # Move to the next batch
             if verbose:
                 pbar.update(batch_size)
         except torch.cuda.OutOfMemoryError:

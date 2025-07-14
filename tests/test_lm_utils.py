@@ -183,7 +183,7 @@ MODEL_GROUND_TRUTH = {
     ],
     "google/gemma-2-2b-it": [
         {
-            "pre": torch.tensor([235248, 108, 2, 106, 1645, 108]),
+            "pre": torch.tensor([2, 106, 1645, 108]),
             "attack_prefix": torch.tensor([235297, 1141, 1141, 1141, 1141]),
             "prompt": torch.tensor([4521, 235269, 1368, 708, 692, 235336]),
             "attack_suffix": torch.tensor([235297, 1141, 1141, 1141, 1141]),

@@ -213,7 +213,7 @@ class SchemaValidationError(RuntimeError):
 
 def _validate_json(schema: Mapping[str, Any], value: Any) -> None:
     """
-    Minimal validator for LM Format Enforcer–style schemas.
+    Minimal validator for LM Format Enforcer-style schemas.
 
     Checks:
       • required keys present

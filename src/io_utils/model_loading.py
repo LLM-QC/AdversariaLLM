@@ -6,18 +6,43 @@ and tokenizers with various optimizations and model-specific configurations.
 """
 
 import gc
-import os
 from functools import lru_cache
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from omegaconf import DictConfig
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+)
 from transformers.utils.logging import disable_progress_bar
 
 disable_progress_bar()  # disable progress bar for model loading
 
 
-def load_model_and_tokenizer(model_params):
+def load_model_and_tokenizer(
+    model_params: DictConfig,
+) -> tuple[PreTrainedModel, PreTrainedTokenizerBase]:
+    """Load a model and tokenizer from a model parameters configuration.
+
+    Why do we need this?
+    Technically, AutoModelForCausalLM.from_pretrained() and AutoTokenizer.from_pretrained()
+    should handle what we're doing here, but there are many models which do not work
+    correctly out of the box. Common issues include:
+    - model_max_length is not set correctly
+    - eos_token_id/pad_token_id/unk_token_id/bos_token_id are not set correctly
+    - chat_template is not set correctly
+    - etc.
+
+    Args:
+        model_params: A configuration object containing model parameters.
+
+    Returns:
+        A tuple containing the loaded model and tokenizer.
+    """
     gc.collect()
     torch.cuda.empty_cache()
     if "float" not in model_params.dtype:
@@ -65,7 +90,7 @@ def load_model_and_tokenizer(model_params):
         model_params.tokenizer_id,
         trust_remote_code=model_params.trust_remote_code,
         truncation_side="left",
-        padding_side="left"
+        padding_side="left",
     )
     # Model-specific tokenizer fixes
     match model_params.tokenizer_id.lower():
@@ -85,16 +110,16 @@ def load_model_and_tokenizer(model_params):
             tokenizer.model_max_length = 4096
         case path if "meta-llama/meta-llama-3-8b-instruct" in path:
             tokenizer.model_max_length = 8192
-            tokenizer.eos_token_id = 128009  # want to use <|eot_id|> instead of <|eos_id|>  (https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct/discussions/4)
+            tokenizer.eos_token_id = 128009  # want to use <|eot_id|> instead of <|eos_id|>  (https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct/discussions/4)  # fmt: off
         case path if "grayswanai/llama-3-8b-instruct-rr" in path:
-            tokenizer.eos_token_id = 128009  # want to use <|eot_id|> instead of <|eos_id|>
+            tokenizer.eos_token_id = 128009  # want to use <|eot_id|> instead of <|eos_id|>  # fmt: off
         case path if "nousresearch/hermes-2-pro-llama-3-8b" in path:
             tokenizer.model_max_length = 8192
         case path if "llm-lat/robust-llama3-8b-instruct" in path:
             tokenizer.model_max_length = 8192
         case path if "openchat/openchat_3.5" in path:
             tokenizer.model_max_length = 8192
-        case path if 'mistralai/mistral-7b-instruct-v0.3' in path:
+        case path if "mistralai/mistral-7b-instruct-v0.3" in path:
             tokenizer.model_max_length = 32768
         case path if "mistralai/ministral-8b-instruct-2410" in path:
             tokenizer.model_max_length = 32768
@@ -103,11 +128,15 @@ def load_model_and_tokenizer(model_params):
         case path if "gemma-2" in path:
             tokenizer.model_max_length = 8192
         case path if "gemma-3" in path:
-            tokenizer.model_max_length = 32768  # true ctx is 128k but we dont have that much memory
-        case path if 'zephyr' in path:
+            tokenizer.model_max_length = (
+                32768  # true ctx is 128k but we dont have that much memory
+            )
+        case path if "zephyr" in path:
             tokenizer.model_max_length = 32768
     if tokenizer.model_max_length > 262144:
-        raise ValueError(f"Model max length {tokenizer.model_max_length} is probably too large.")
+        raise ValueError(
+            f"Model max length {tokenizer.model_max_length} is probably too large."
+        )
 
     if model_params.chat_template is not None:
         tokenizer.chat_template = load_chat_template(model_params.chat_template)
@@ -117,10 +146,22 @@ def load_model_and_tokenizer(model_params):
     return model, tokenizer
 
 
-def load_chat_template(template_name):
+def load_chat_template(template_name: str) -> str:
+    """Load a chat template from the chat_templates directory.
+
+    Also removes indentation and newlines from the template to get the correct format.
+
+    Args:
+        template_name: The name of the template to load.
+
+    Returns:
+        The chat template as a string.
+    """
     # Get project root by going up from current file
     project_root = Path(__file__).parent.parent.parent
-    template_path = project_root / "chat_templates" / "chat_templates" / f"{template_name}.jinja"
+    template_path = (
+        project_root / "chat_templates" / "chat_templates" / f"{template_name}.jinja"
+    )
     return template_path.read_text().replace("    ", "").replace("\n", "")
 
 

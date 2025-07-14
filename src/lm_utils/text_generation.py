@@ -126,7 +126,7 @@ class TextGenerator(ABC):
         raise NotImplementedError("Subclasses must implement the generate method.")
 
 
-class HFLocalTextGen(TextGenerator):
+class LocalTextGenerator(TextGenerator):
     """
     A local backend for text generation using Hugging Face transformers based on the `generate_ragged_batched` function.
     This class is essentially a wrapper around the Hugging Face transformers library to provide a consistent interface for text generation.
@@ -197,7 +197,7 @@ class HFLocalTextGen(TextGenerator):
         return [token_ids]
 
 
-class APITextGen(TextGenerator):
+class APITextGenerator(TextGenerator):
     """
     API-based text generation using various models. Note that not all models support all parameters. This class is mainly tailored and tested with OpenAI models.
 
