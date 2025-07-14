@@ -194,6 +194,72 @@ gcg_judge:
   filter_ids: True
   verbosity: WARNING
   token_selection: default
+gcg_reinforce:
+  name: gcg_reinforce
+  type: discrete
+  version: 0.0.1
+  placement: suffix
+  generation_config: ${attacks._default.generation_config}
+  seed: ${attacks._default.seed}
+  num_steps: 500
+  optim_str_init: "! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !" # initialization for REINFORCE
+  search_width: 512
+  topk: 256
+  n_replace: 1
+  buffer_size: 0
+  loss: "ce"
+  use_constrained_gradient: False
+  mellowmax_alpha: 1.0
+  early_stop: False
+  use_prefix_cache: True
+  allow_non_ascii: False
+  allow_special: False
+  filter_ids: True
+  verbosity: WARNING
+  token_selection: default
+  grow_target: False
+  grad_smoothing: 1
+  grad_momentum: 0.0
+  # REINFORCE-specific parameters
+  judge_model_name: "cais/HarmBench-Llama-2-13b-cls"
+  judge_weight: 1.0
+  target_weight: 0.0
+  # Generation parameters
+  gen_max_len: 128
+  gen_topk: 256
+  gen_temperatures: [0.0, 0.7]
+  gen_additional_judge_lengths: [20, 40, 80]
+  gen_in_parallel_over_temps: False
+  # Baseline parameters
+  bsln_temperature_complete: 0.0
+  bsln_reward_clamp_min: 0.5
+  bsln_reward_clamp_max: 1.0
+  bsln_ignore: False
+  # REINFORCE weighting
+  include_most_harmful: True
+  include_most_harmful_min_reward_thres: 0.2
+  include_most_harmful_likelihood_thres: 0.75
+  add_nogen_reward_baseline: 0.1
+  token_reinforce_weighting: "token"
+  normalize_reinforce_loss: True
+  judge_with_control: False
+  # Search parameters
+  search_target_metric: "agg_reinforce_loss"
+  search_monotonically: False
+  search_deterministic_loss: True
+  search_patience: -1
+  search_greedy_reward_exploit_threshold: 0.8
+  search_sample_strategy: "gradient"
+  selection_extend_length_harmfulness: 0.01
+  selection_starting_batch_size: 256
+  # Early stopping
+  early_stopping_abort: False
+  early_stopping_abort_min_loss: 0.1
+  early_stopping_key: "agg_reinforce_loss"
+  # Token position weighting
+  token_position_weighting_kwargs:
+    name: "linear"
+    first_last_ratio: 5.0
 human_jailbreaks:
   name: human_jailbreaks
   type: discrete
@@ -273,17 +339,33 @@ pgd_discrete:
   seed: ${attacks._default.seed}
   optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
   optimizer: "Adam"  # "Adam" or "SAM"
-  projection: "simplex"  # "simplex" or "l2" or "l1"
-  alpha: 0.001
+  projection: "simplex"  # "simplex", "l2", "l1", or null
+  alpha: 0.1
   restart_every: 100
   lr_scheduler:
-    type: "constant"  # "constant" or "cosine"
-    # constant
+    type: "sequential"  # "constant", "cosine", or "sequential"
     factor: 1.0
-    total_iters: 100
-    # cosine
     eta_min: 0.325
     T_0: 60
+    total_iters: 100
+  initialization: "one_hot"  # "random" or "one_hot"
+  entropy_factor: 0.4
+  anneal: true
+  anneal_config:
+    start: 0
+    duration: 250
+    attrs: ["entropy_factor"]
+    mode: "uniform"  # "uniform" or "uniform_log"
+    init_entropy_factor: 0.0
+    end_entropy_factor: 0.4
+  grad_clip_value: 20.0
+  grad_clip_strategy: "token_norm"  # "norm", "token_norm", or "value"
+  tsallis_q2_proj_config:
+    iter: 1
+    exclude_already_zero: true
+  entropy_factor_scale_by_relaxation_gap: 0.1
+  entropy_factor_alternate_scheduler: true
+  langevin_dynamics_std: null  # float value to enable, null to disable
 prefilling:
   name: prefilling
   type: discrete

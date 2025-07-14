@@ -122,10 +122,10 @@ class Attack(Generic[AttRes]):
                 from .gcg import GCGAttack
 
                 return GCGAttack
-            case "gcg_judge":
-                from .gcg_judge import GCGJudgeAttack
+            case "gcg_reinforce":
+                from .gcg_reinforce import GCGReinforceAttack
 
-                return GCGJudgeAttack
+                return GCGReinforceAttack
             case "gcg_refusal":
                 from .gcg_refusal import GCGRefusalAttack
 
@@ -142,7 +142,7 @@ class Attack(Generic[AttRes]):
                 from .pgd import PGDAttack
 
                 return PGDAttack
-            case "pgd_one_hot":
+            case "pgd_discrete":
                 from .pgd_discrete import PGDDiscreteAttack
 
                 return PGDDiscreteAttack
