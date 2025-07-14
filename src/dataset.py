@@ -66,6 +66,8 @@ class PromptDataset(torch.utils.data.Dataset):
                 return JBBBehaviorsDataset
             case "or_bench":
                 return ORBenchDataset
+            case "strong_reject":
+                return StrongRejectDataset
             case "xs_test":
                 return XSTestDataset
             case _:
@@ -193,6 +195,7 @@ class JBBBehaviorsDataset(PromptDataset):
         return conversation
 
 
+@dataclass
 class StrongRejectConfig:
     name: str
     categories: list[str]
@@ -214,29 +217,31 @@ class StrongRejectDataset(PromptDataset):
             url += "strongreject_dataset.csv"
 
         self.dataset = load_dataset("csv", data_files=url)[config.split]
-        self.targets = open(os.path.join(config.path, "targets.txt"), "r").readlines()
+        self.targets = [line.rstrip() for line in open(os.path.join(config.path, "targets.txt"), "r").readlines()]
         assert len(self.dataset) == len(self.targets), "Mismatched lengths"
 
         # Add targets as a column to the dataset
         self.dataset = self.dataset.add_column("target", self.targets)
-        # Ignore copyright-related rows
-        self.messages = self.dataset[
-            self.dataset["category"].isin(config.categories)
-        ]
+        # Convert to pandas DataFrame for easier manipulation
+        self.dataset = self.dataset.to_pandas()
 
-        idx = self._select_idx(config, len(self.messages))
+        self.idx, self.config_idx = self._select_idx(config, len(self.dataset))
+        self.dataset = self.dataset.iloc[self.idx]
 
-        # cut
-        self.messages = self.messages.iloc[idx].reset_index(drop=True)
+        # Filter by categories
+        self.dataset = self.dataset[self.dataset["category"].isin(config.categories)]
+        self.messages = self.dataset["forbidden_prompt"]
+        self.targets = self.dataset["target"]
 
     def __len__(self):
         return len(self.messages)
 
     def __getitem__(self, idx: int) -> Conversation:
         msg = self.messages.iloc[idx]
+        target = self.targets.iloc[idx]
         conversation = [
-            {"role": "user", "content": msg["forbidden_prompt"]},
-            {"role": "assistant", "content": msg["target"]}
+            {"role": "user", "content": msg},
+            {"role": "assistant", "content": target}
         ]
         return conversation
 
@@ -347,6 +352,10 @@ if __name__ == "__main__":
     print(len(d))
     d = PromptDataset.from_name("or_bench")(
         ORBenchConfig("or_bench", seed=1)
+    )
+    print(len(d))
+    d = PromptDataset.from_name("strong_reject")(
+        StrongRejectConfig("strong_reject", path="data/strong_reject", version="full", categories=["Disinformation and deception", "Hate, harassment and discrimination", "Illegal goods and services", "Non-violent crimes", "Sexual content", "Violence"], seed=1)
     )
     print(len(d))
     d = PromptDataset.from_name("xs_test")(

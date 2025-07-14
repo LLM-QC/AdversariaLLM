@@ -41,6 +41,10 @@ def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | No
         if len(inp) != input_length:
             raise ValueError(f"All inputs must have the same length. Input 0 has length {input_length}, but input {i} has length {len(inp)}")
 
+    # Handle empty input case
+    if input_length == 0:
+        return function(*inputs)
+
     outputs = []
     batch_start = 0
 

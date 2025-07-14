@@ -41,3 +41,5 @@ strong_reject:
   seed: 0
   idx: null
   shuffle: true
+  version: "full"
+  categories: ["Disinformation and deception", "Hate, harassment and discrimination", "Illegal goods and services", "Non-violent crimes", "Sexual content", "Violence"]
