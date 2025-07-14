@@ -25,7 +25,7 @@ from .tokenization import prepare_conversation
 
 @dataclass
 class GenerationResult:
-    gen: list[list[str]]  # n_choices x batch_size
+    gen: list[list[str]]  # batch_size x n_choices
     input_ids: Optional[list[int]] = None
 
     @property
@@ -153,6 +153,9 @@ class HFLocalTextGen(TextGenerator):
         json_schema: Optional[JsonSchema] = None,
         **kwargs: Any,
     ) -> GenerationResult:
+        if len(convs) == 0:
+            return GenerationResult(gen=[[]])
+
         common_generate_args = CommonGenerateArgs(
             num_return_sequences=num_return_sequences,
             max_new_tokens=max_new_tokens,
@@ -226,6 +229,9 @@ class APITextGen(TextGenerator):
         json_schema: Optional[JsonSchema] = None,
         **kwargs: Any,
     ) -> GenerationResult:
+        if len(convs) == 0:
+            return GenerationResult(gen=[[]])
+
         common_generate_args = CommonGenerateArgs(
             num_return_sequences=num_return_sequences,
             max_new_tokens=max_new_tokens,
