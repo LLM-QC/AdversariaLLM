@@ -17,7 +17,6 @@ from typing import Optional
 
 import numpy as np
 import torch
-from accelerate.utils import find_executable_batch_size
 from tqdm import trange
 
 from src.attacks.attack import (Attack, AttackResult, AttackStepResult,
@@ -71,7 +70,7 @@ class AutoDANAttack(Attack):
             mutate_model = HuggingFace(
                 self.config.mutate_model.id,
                 self.config.mutate_model,
-            ).to(device).eval()
+            )
         else:
             mutate_model = HuggingFace(model, tokenizer)
 

@@ -270,7 +270,7 @@ human_jailbreaks:
 pair:
   name: pair
   type: discrete
-  version: 0.0.1
+  version: 0.0.2
   seed: ${attacks._default.seed}
   generation_config: ${attacks._default.generation_config}
   num_streams: 1

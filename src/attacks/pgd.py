@@ -11,7 +11,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, List, Dict
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -19,10 +19,11 @@ from torch.nn.utils.rnn import pad_sequence
 from tqdm import trange
 from transformers import AutoModelForCausalLM, PreTrainedTokenizer
 
-from src.attacks import (Attack, AttackResult, AttackStepResult,
-                         GenerationConfig, SingleAttackRunResult)
-from src.lm_utils import (generate_ragged_batched, prepare_conversation,
-                          with_max_batchsize, TokenMergeError, get_disallowed_ids)
+from src.attacks import (Attack, AttackResult, AttackStepResult, GenerationConfig,
+                         SingleAttackRunResult)
+from src.lm_utils import (TokenMergeError, generate_ragged_batched, get_disallowed_ids,
+                          prepare_conversation, with_max_batchsize)
+
 
 @dataclass
 class OptimizerConfig:

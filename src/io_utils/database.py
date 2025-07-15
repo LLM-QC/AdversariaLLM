@@ -6,6 +6,7 @@ database operations for attack result management and analysis.
 """
 
 import os
+import glob
 
 from omegaconf import OmegaConf
 from pymongo import MongoClient
@@ -54,15 +55,46 @@ def log_config_to_db(run_config, result, log_file):
         )
 
 
-def delete_orphaned_runs(dry_run: bool = False):
+def delete_orphaned_runs(dry_run: bool = False, direction: str = "both"):
+    """
+    Delete orphaned runs from the database.
+
+    Args:
+        dry_run: If True, only print what would be deleted without actually deleting
+        direction: "db_only" - remove DB entries for missing files
+                  "files_only" - remove files not tracked in DB
+                  "both" - do both operations
+    """
     db = get_mongodb_connection()
-    items = db.runs.find()
-    for item in items:
-        log_file = item["log_file"]
-        if not os.path.exists(log_file):
-            print(f"Log file not found: {log_file}, deleting from database")
+
+    if direction in ["db_only", "both"]:
+        # Original functionality: remove DB entries for missing files
+        items = db.runs.find()
+        for item in items:
+            log_file = item["log_file"]
+            if not os.path.exists(log_file):
+                print(f"Log file not found: {log_file}, deleting from database")
+                if not dry_run:
+                    db.runs.delete_one({"_id": item["_id"]})
+
+    if direction in ["files_only", "both"]:
+        tracked_files = set()
+        items = db.runs.find({}, {"log_file": 1})  # Only fetch log_file field
+        for item in items:
+            tracked_files.add(item["log_file"])
+
+        all_run_files = set(glob.glob("outputs/**/run.json", recursive=True))
+        all_run_files_absolute = set(os.path.abspath(f) for f in all_run_files)
+
+        # Find untracked files
+        untracked_files = all_run_files_absolute - tracked_files
+        print(f"Found {len(untracked_files)} untracked files")
+
+        for untracked_file in sorted(list(untracked_files)):
+            print(f"Untracked run file found: {untracked_file}")
             if not dry_run:
-                db.runs.delete_one({"_id": item["_id"]})
+                print(f"Deleting untracked file: {untracked_file}")
+                os.remove(untracked_file)
 
 
 def check_match(doc_fragment, filter_fragment):
