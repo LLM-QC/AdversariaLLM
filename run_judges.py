@@ -66,7 +66,7 @@ def run_judges(cfg: DictConfig) -> None:
         return
     logging.info(f"Found {len(paths)} paths")
     logging.info("Loading judge...")
-    judge = Judge.from_name(cfg.classifier)
+    judge = None
     n = 0
     pbar = tqdm(paths, file=sys.stdout)
     for path in pbar:
@@ -80,6 +80,9 @@ def run_judges(cfg: DictConfig) -> None:
                     modified_prompts = []
                     if cfg.classifier in subrun["steps"][0]["scores"]:
                         continue
+                    # Late init to avoid loading the judge if not needed
+                    if judge is None:
+                        judge = Judge.from_name(cfg.classifier)
                     for step in subrun["steps"]:
                         model_input = step["model_input"]
                         completions: list = step["model_completions"]
