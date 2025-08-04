@@ -21,7 +21,7 @@ class RunConfig:
     attack_params: dict
 
 
-def filter_config(run_config: RunConfig, dset_len: int, overwrite: bool = False) -> bool:
+def filter_config(run_config: RunConfig, dset_len: int, overwrite: bool = False) -> RunConfig | None:
     db = get_mongodb_connection()
     collection = db.runs
 

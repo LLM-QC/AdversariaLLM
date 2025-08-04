@@ -244,13 +244,15 @@ class GCGReinforceAttack(Attack[GCGReinforceConfig]):
         t_rewards_start = time.time()
         rewards, generations, categories, flops_loss = self.compute_candidate_rewards(conversation, optim_ids)
         t_rewards = time.time() - t_rewards_start
-        print(f"  Compute rewards: {t_rewards:.2f}s")
+        self.logger.info(f"  Compute rewards: {t_rewards:.2f}s")
 
         # Once the greedy generation has become harmful, we only accept new optim_ids if
         # the greedy generation remains harmful.
         if "greedy" in self.config.loss_include_categories and self.previous_greedy_reward > self.config.harmful_threshold:
             if self._get_greedy_reward(rewards) <= self.config.harmful_threshold:
-                print(f"  Exploit greedy: Rejected new optim_ids (greedy_reward={self._get_greedy_reward(rewards):.3f} <= {self.config.harmful_threshold}, but self.previous_greedy_reward={self.previous_greedy_reward:.3f})")
+                self.logger.info("Exploit greedy: Rejected new optim_ids")
+                self.logger.info(f"  {self.tokenizer.decode(optim_ids.squeeze(0))} with {self._get_greedy_reward(rewards):.3f}")
+                self.logger.info(f"  {self.tokenizer.decode(self.previous_optim_ids.squeeze(0))}  had {self.previous_greedy_reward:.3f}")
                 optim_ids = self.previous_optim_ids
                 rewards = self.previous_rewards
                 generations = self.previous_generations
@@ -434,9 +436,10 @@ class GCGReinforceAttack(Attack[GCGReinforceConfig]):
 
         to_judge = [c for c in conversation_with_completions if c[1]["content"] not in self.reward_cache]
         # Compute judgements for the entire conversation
-        judgements = self.judge(to_judge)["p_harmful"]
-        for c, j in zip(to_judge, judgements):
-            self.reward_cache[c[1]["content"]] = j
+        if to_judge:
+            judgements = self.judge(to_judge)["p_harmful"]
+            for c, j in zip(to_judge, judgements):
+                self.reward_cache[c[1]["content"]] = j
 
         rewards = torch.tensor([self.reward_cache[c[1]["content"]] for c in conversation_with_completions]).to(self.model.device)
 

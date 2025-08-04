@@ -10,17 +10,17 @@ import filelock
 import hydra
 import torch
 from judgezoo import Judge
-from omegaconf import DictConfig, ListConfig
+from omegaconf import DictConfig, ListConfig, OmegaConf
 from tqdm import tqdm
 
 from src.errors import print_exceptions
-from src.io_utils import CompactJSONEncoder, get_mongodb_connection, delete_orphaned_runs
+from src.io_utils import CompactJSONEncoder, get_mongodb_connection, delete_orphaned_runs, get_filtered_and_grouped_paths
 
 torch.use_deterministic_algorithms(True, warn_only=True)  # determinism
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-def collect_run_paths(suffixes: list[str]|str, classifier: str) -> list[str]:
+def collect_run_paths(suffixes: list[str]|str, classifier: str, filter_by: dict|None) -> list[str]:
     """
     Collect paths to run files that have not been scored by the specified classifier.
 
@@ -31,6 +31,7 @@ def collect_run_paths(suffixes: list[str]|str, classifier: str) -> list[str]:
     Returns:
         List of paths to run files
     """
+
     if not isinstance(suffixes, (list, ListConfig)):
         suffixes = [str(suffixes)]
     delete_orphaned_runs()
@@ -49,6 +50,9 @@ def collect_run_paths(suffixes: list[str]|str, classifier: str) -> list[str]:
             paths.append(log_file)
     # remove duplicates
     paths = list(set(paths))
+    if filter_by:
+        filtered_paths = set(get_filtered_and_grouped_paths(OmegaConf.to_container(filter_by, resolve=True), None)[("all",)])
+        paths = [p for p in paths if p in filtered_paths]
     return sorted(paths, reverse=True)
 
 
@@ -60,7 +64,7 @@ def run_judges(cfg: DictConfig) -> None:
     logging.info("-------------------")
     logging.info(cfg)
 
-    paths = collect_run_paths(cfg.suffixes, cfg.classifier)
+    paths = collect_run_paths(cfg.suffixes, cfg.classifier, cfg.filter_by)
     if not paths:
         logging.info("No unjudged paths found")
         return

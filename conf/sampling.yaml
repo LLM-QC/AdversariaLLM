@@ -14,8 +14,16 @@ hydra:
 
 name: testing
 save_dir: ${root_dir}/outputs/
-num_return_sequences: 500  # we generate completions such that the final result has num_return_sequences completions
 
+# What generation config to use for sampling
+generation_config:
+  temperature: 0.0
+  top_p: 1.0
+  top_k: 0
+  max_new_tokens: 256
+  num_return_sequences: 1
+
+# What to filter by
 filter_by:
   model: meta-llama/Meta-Llama-3.1-8B-Instruct
   attack: gcg
@@ -27,5 +35,3 @@ filter_by:
       num_return_sequences: 50
   dataset_params:
     idx: 0
-
-

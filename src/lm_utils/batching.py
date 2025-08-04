@@ -14,10 +14,10 @@ from tqdm import tqdm
 from ..io_utils import free_vram
 
 
-def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | None = None, verbose: bool = False):
+def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | None = None, verbose: bool = False, success_threshold: int = 64):
     """
     Dynamically adjust batch size if an OOM error occurs.
-    TODO: Try increasing batch size again if we have enough VRAM.
+    Also tries increasing batch size when many batches succeed consecutively.
 
     Args:
         function: Callable
@@ -25,10 +25,12 @@ def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | No
             All input arguments should have the same length in their first dimension (batch dimension).
         *inputs:
             The inputs to pass to the function. All inputs must be tensors or lists and have the same length in their first dimension.
-        initial_batch_size:
-            Starting batch size for execution.
-        verbose:
+        initial_batch_size: int | None, default None
+            Starting batch size for execution. If None, the batch size is set to the closest power of two of the input length.
+        verbose: bool, default False
             Whether to print progress.
+        success_threshold: int, default 64
+            Number of consecutive successful batches before attempting to double batch size.
     Returns:
         The output of the function.
     """
@@ -47,6 +49,7 @@ def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | No
 
     outputs = []
     batch_start = 0
+    successful_batches = 0
 
     def next_power_of_two(n):
         return 1 << (n - 1).bit_length()
@@ -65,11 +68,22 @@ def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | No
             output = function(*chunks)
             outputs.append(output)
             batch_start += batch_size  # Move to the next batch
+            successful_batches += 1
+
+            # Try to double batch size if we've had many successful batches
+            if (successful_batches >= success_threshold and
+                batch_size * 2 <= input_length):
+                batch_size = batch_size * 2
+                successful_batches = 0  # Reset counter
+                if verbose:
+                    pbar.set_description(f"Increasing batch size to b={batch_size}")
+
             if verbose:
                 pbar.update(batch_size)
         except torch.cuda.OutOfMemoryError:
             # If we hit OOM, reduce batch size and retry the same chunk
             batch_size = batch_size // 2
+            successful_batches = 0  # Reset counter after OOM
             if verbose:
                 pbar.set_description(f"Running function b={batch_size}")
             if batch_size < 1:
