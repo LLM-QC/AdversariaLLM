@@ -210,7 +210,6 @@ class ActorAttack(Attack[ActorAttackResult]):
                 )
                 break
             except Exception as e:  # mainly for api
-                print("Error in extract_harm_target:", e)
                 logging.error(f"Error in extract_harm_target: {e}")
                 logging.error(f"Error in extract_harm_target try{i}: {e}\nres: {responses}")
                 if i < max_attempts - 1:
@@ -298,7 +297,6 @@ class ActorAttack(Attack[ActorAttackResult]):
                 break
             except Exception as e:  # mainly for api
                 if attempt_num < max_attempts - 1:
-                    print("Error in get_actors:", e)
                     logging.error(f"Error in get_actors try{attempt_num}: {e}\nres: {responses}")
                     dialog_hists = original_dialog_hists
                     continue
@@ -359,15 +357,7 @@ class ActorAttack(Attack[ActorAttackResult]):
                 break
 
             except Exception as e:
-                logging.error(f"Error in get_queries try{attempt_num}: {e}\nres: {json_outputs}")
-                print(
-                    "Error in get_queries:",
-                    e,
-                    "query_resp:",
-                    query_responses,
-                    "json_output:",
-                    json_outputs,
-                )
+                logging.error(f"Error in get_queries try{attempt_num}: {e}\n\nquery_responses: {query_responses}\njson_outputs: {json_outputs}")
 
                 if attempt_num < max_attempts - 1:
                     continue
@@ -424,7 +414,6 @@ class ActorAttack(Attack[ActorAttackResult]):
                 break
             except Exception as e:
                 logging.error(f"Error in step_judge try{attempt_num}: {e}\nres: {output_strs}")
-                print("Error in step_judge: ", e)
                 if attempt_num < max_attempts - 1:
                     continue
                 else:
@@ -459,7 +448,7 @@ class ActorAttack(Attack[ActorAttackResult]):
                     output_strs = attacker_model.generate_from_prompts(prompts)
                     return output_strs
                 except Exception as e:
-                    print("Error in modify_query: ", e)
+                    logging.error(f"Error in modify_query: {e}")
                     continue
             return ""
 
@@ -584,7 +573,6 @@ class ActorAttack(Attack[ActorAttackResult]):
 
                     break
                 except Exception as e:
-                    print(f"Error in call_multi: {e}")
                     logging.error(f"Error in call_multi: {e}")
 
             dialog_hists = update_masked_subset(dialog_hists, active_mask, active_hists)
@@ -718,7 +706,6 @@ class ActorAttack(Attack[ActorAttackResult]):
 
         except Exception as e:
             logging.error(f"Error in summary: {e}")
-            print(f"Error in summary:{e}")
 
         # unflatten flat_dialog_hists
         nested_dialog_hists = []
@@ -765,10 +752,6 @@ class ActorAttack(Attack[ActorAttackResult]):
                 attack_strat["query_details_list"],
                 dialog_hists_list,
             )
-
-            # except Exception as e:
-            #     print(f"Error in attack_single: {e}")
-            #     continue
 
         return dialog_hists_list
 
@@ -932,7 +915,6 @@ class GeneralJudge(ABC):
                 )
             except Exception as e:
                 logging.error(f"Error in batch_judge try {attempt_num}: {e}\nres: {output_strs}")
-                print("Error in batch_judge: ", e)
                 if attempt_num < max_attempts - 1:
                     continue
                 else:
