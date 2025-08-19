@@ -40,6 +40,14 @@ base_phi3_5_rf: &base_phi3_5_rf
     manual_untie_embeddings: False
 
 # Model configurations using aliases
+redflag-tokens/llama3-2-rf-filter5-v3:
+  <<: *base_llama3_2_rf
+  id: redflag-tokens/llama3.2-RF-filter5-7481078-chkpt-1000
+
+redflag-tokens/llama3-2-rf-v3:
+  <<: *base_llama3_2_rf
+  id: redflag-tokens/llama3.2-RF-7466465-chkpt-1000
+
 redflag-tokens/llama3-2-rf-fixed-pos-v2:
   <<: *base_llama3_2_rf
   id: redflag-tokens/fixed-pos-baseline-7069757-chkpt-625
