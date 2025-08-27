@@ -6,8 +6,9 @@ from dataclasses import dataclass, field
 import torch
 import transformers
 
-from src.attacks import Attack, AttackResult, GenerationConfig, SingleAttackRunResult, AttackStepResult
-from src.lm_utils import generate_ragged_batched, prepare_conversation
+from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
+                     SingleAttackRunResult)
+from ..lm_utils import generate_ragged_batched, prepare_conversation
 
 
 @dataclass

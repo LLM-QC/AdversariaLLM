@@ -29,10 +29,9 @@ import gc
 import logging
 import math
 import random
+import string
 import sys
 import time
-import string
-
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Literal
@@ -43,12 +42,12 @@ from torch import Tensor
 from tqdm import trange
 from transformers import DynamicCache, PreTrainedModel, PreTrainedTokenizer
 
-from src.lm_utils import (filter_suffix, generate_ragged_batched,
-                          get_disallowed_ids, prepare_conversation,
-                          with_max_batchsize, TokenMergeError, get_flops)
-
-from src.dataset import PromptDataset
-from .attack import Attack, AttackResult, GenerationConfig, SingleAttackRunResult, AttackStepResult
+from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
+                     SingleAttackRunResult)
+from ..dataset import PromptDataset
+from ..lm_utils import (TokenMergeError, filter_suffix, generate_ragged_batched,
+                        get_disallowed_ids, get_flops, prepare_conversation,
+                        with_max_batchsize)
 
 
 @dataclass
@@ -197,19 +196,19 @@ def compute_loss(shift_logits: Tensor, shift_labels: Tensor, loss_type: str, mel
         loss = torch.nn.functional.kl_div(log_probs, tgt_dist.expand(B, T, -1), reduction="none").sum(dim=-1) # (B, T, D) -> (B, T)
         loss = loss[:, 0] # (B, T) -> (B,)
     elif loss_type == "kl_allowed_fwd":
-        log_probs = torch.nn.functional.log_softmax(shift_logits.float(), dim=-1)
-        B, T, D = log_probs.shape
-        N_valid = D - len(disallowed_ids)
-        tgt_dist = torch.full((1, 1, D), device=log_probs.device, fill_value=1 / N_valid)
-        tgt_dist[0, 0, disallowed_ids] = 0
+        log_probs = torch.nn.functional.log_softmax(shift_logits.float(), dim=-1)[:, 0]
+        B, V = log_probs.shape
+        N_valid = V - len(disallowed_ids)
+        tgt_dist = torch.full((1, V), device=log_probs.device, fill_value=1 / N_valid)
+        tgt_dist[0, disallowed_ids] = 0
         model_probs = log_probs.exp()
         log_tgt = torch.log(tgt_dist + 1e-30)
         loss = torch.nn.functional.kl_div(
-            log_tgt.expand(B, T, -1),
+            log_tgt.expand(B, -1),
             model_probs,
             reduction="none"
-        )                                 # (B, T, D)
-        loss = loss.sum(dim=-1)[:, 0]  # (B, T, D) -> (B,)
+        )                                 # (B, D)
+        loss = loss.sum(dim=-1)  # (B, D) -> (B,)
     elif loss_type == "kl_allowed_fwd_ascii_only":
         allowed_toks = string.ascii_letters + string.whitespace + string.digits + string.punctuation + tokenizer.convert_ids_to_tokens(tokenizer.encode("a b")[-1:])[0][0]
         new_disallowed_ids = []
@@ -262,160 +261,202 @@ class GCGAttack(Attack):
         self.not_allowed_ids = self.not_allowed_ids[self.not_allowed_ids < model.get_input_embeddings().weight.size(0)]
         runs = []
         for conversation in dataset:
-            t0 = time.time()
-            try:
-                attack_conversation = [
-                    {"role": "user", "content": conversation[0]["content"] + self.config.optim_str_init},
-                    {"role": "assistant", "content": conversation[1]["content"]},
-                ]
-                pre_ids, attack_prefix_ids, prompt_ids, attack_suffix_ids, post_ids, target_ids = prepare_conversation(tokenizer, conversation, attack_conversation)[0]
-            except TokenMergeError:
-                attack_conversation = [
-                    {"role": "user", "content": conversation[0]["content"] + " " + self.config.optim_str_init},
-                    {"role": "assistant", "content": conversation[1]["content"]},
-                ]
-                pre_ids, attack_prefix_ids, prompt_ids, attack_suffix_ids, post_ids, target_ids = prepare_conversation(tokenizer, conversation, attack_conversation)[0]
-
-            pre_ids = pre_ids.unsqueeze(0).to(model.device)
-            # attack_prefix_ids = attack_prefix_ids.unsqueeze(0).to(model.device)
-            prompt_ids = prompt_ids.unsqueeze(0).to(model.device)
-            pre_prompt_ids = torch.cat([pre_ids, prompt_ids], dim=1)
-            attack_ids = attack_suffix_ids.unsqueeze(0).to(model.device)
-            post_ids = post_ids.unsqueeze(0).to(model.device)
-            target_ids = target_ids.unsqueeze(0).to(model.device)
-
-            # Embed everything that doesn't get optimized
-            embedding_layer = model.get_input_embeddings()
-            pre_prompt_embeds, post_embeds, target_embeds = [
-                embedding_layer(ids) for ids in (pre_prompt_ids, post_ids, target_ids)
-            ]
-            # Compute the KV Cache for tokens that appear before the optimized tokens
-            if self.config.use_prefix_cache and "gemma" not in model.name_or_path:
-                with torch.no_grad():
-                    self.prefix_cache = DynamicCache()
-                    output = model(inputs_embeds=pre_prompt_embeds, past_key_values=self.prefix_cache, use_cache=True)
-                    self.prefix_cache = output.past_key_values
-                flops_prefill = get_flops(model, pre_prompt_embeds.shape[0]*pre_prompt_embeds.shape[1], 0, "forward")
-            else:
-                self.prefix_cache = None
-                flops_prefill = 0
-
-            self.target_ids = target_ids
-            self.pre_prompt_embeds = pre_prompt_embeds
-            self.post_embeds = post_embeds
-            self.target_embeds = target_embeds
-
-            if self.config.grow_target:
-                self.target_length = 1
-            else:
-                self.target_length = target_ids.size(1)
-            # Initialize the attack buffer
-            buffer, flops_init = self.init_buffer(model, attack_ids)
-            optim_ids = buffer.get_best_ids()
-            token_selection = SubstitutionSelectionStrategy(self.config.token_selection, self.config, self.prefix_cache, self.pre_prompt_embeds, self.post_embeds, self.target_embeds, self.target_ids, self.not_allowed_ids, self.tokenizer)
-            losses = []
-            times = []
-            flops = []
-            optim_strings = []
-            self.stop_flag = False
-            current_loss = buffer.get_lowest_loss()
-
-            for _ in (pbar := trange(self.config.num_steps, file=sys.stdout)):
-                t0a = time.time()
-                token_selection.target_ids = self.target_ids[:, :self.target_length]
-                token_selection.target_embeds = self.target_embeds[:, :self.target_length]
-                # Compute the token gradient
-                sampled_ids, sampled_ids_pos, grad, flops_select = token_selection(
-                    optim_ids.squeeze(0),
-                    model,
-                    self.config.search_width,
-                    self.config.topk,
-                    self.config.n_replace,
-                    not_allowed_ids=self.not_allowed_ids,
-                )
-                with torch.no_grad():
-                    # Sample candidate token sequences
-                    if self.config.filter_ids:
-                        # We're trying to be as strict as possible here, so we filter
-                        # the entire prompt, not just the attack sequence in an isolated
-                        # way. This is because the prompt and attack can affect each
-                        # other's tokenization in some cases.
-                        idx = filter_suffix(
-                            tokenizer,
-                            conversation,
-                            [[None, sampled_ids.cpu()]],
-                        )
-                        sampled_ids = sampled_ids[idx]
-                        sampled_ids_pos = sampled_ids_pos[idx]
-
-                    compute_loss_fn = partial(self.compute_candidates_loss, model)
-                    loss, acc, flops_loss = with_max_batchsize(compute_loss_fn, sampled_ids)
-                    flops_loss = flops_loss.sum().item()
-
-                    current_loss = loss.min().item()
-                    optim_ids = sampled_ids[loss.argmin()].unsqueeze(0)
-                    if self.config.grow_target and acc[loss.argmin()]:
-                        self.target_length += 1
-                    # Update the buffer based on the loss
-                    losses.append(current_loss)
-                    times.append(time.time() - t0a)
-                    flops.append(flops_prefill + flops_select + flops_loss + flops_init)
-                    flops_prefill = 0
-                    flops_init = 0
-                    if buffer.size == 0 or current_loss < buffer.get_highest_loss():
-                        buffer.add(current_loss, optim_ids)
-
-                optim_ids = buffer.get_best_ids()
-                optim_str = tokenizer.batch_decode(optim_ids)[0]
-                optim_strings.append(optim_str)
-                pbar.set_postfix({"Loss": current_loss, "# TGT Toks": self.target_length, "Best Attack": optim_str[:80]})
-
-                if self.stop_flag:
-                    self.logger.info("Early stopping due to finding a perfect match.")
-                    break
-
-            token_list = []
-            attack_conversations = []
-            for attack in optim_strings:
-                attack_conversation = [
-                    {"role": "user", "content": conversation[0]["content"] + attack},
-                    {"role": "assistant", "content": ""},
-                ]
-                tokens = prepare_conversation(tokenizer, conversation, attack_conversation)[0]
-                token_list.append(torch.cat(tokens[:5]))
-                attack_conversations.append(attack_conversation)
-            batch_completions = generate_ragged_batched(
-                model,
-                tokenizer,
-                token_list=token_list,
-                initial_batch_size=len(token_list),
-                max_new_tokens=self.config.generation_config.max_new_tokens,
-                temperature=self.config.generation_config.temperature,
-                top_p=self.config.generation_config.top_p,
-                top_k=self.config.generation_config.top_k,
-                num_return_sequences=self.config.generation_config.num_return_sequences,
-            )  # (N_steps, N_return_sequences, T)
-            steps = []
-            t1 = time.time()
-            for i in range(len(optim_strings)):
-                step = AttackStepResult(
-                    step=i,
-                    model_completions=batch_completions[i],
-                    time_taken=times[i],
-                    loss=losses[i],
-                    flops=flops[i],
-                    model_input=attack_conversations[i],
-                    model_input_tokens=token_list[i].tolist(),
-                )
-                steps.append(step)
-
-            run = SingleAttackRunResult(
-                original_prompt=conversation,
-                steps=steps,
-                total_time=t1 - t0,
-            )
-            runs.append(run)
+            runs.append(self._attack_single_conversation(model, tokenizer, conversation))
         return AttackResult(runs=runs)
+
+    def _attack_single_conversation(self, model, tokenizer, conversation) -> SingleAttackRunResult:
+        t0 = time.time()
+        try:
+            attack_conversation = [
+                {"role": "user", "content": conversation[0]["content"] + self.config.optim_str_init},
+                {"role": "assistant", "content": conversation[1]["content"]},
+            ]
+            pre_ids, attack_prefix_ids, prompt_ids, attack_suffix_ids, post_ids, target_ids = prepare_conversation(tokenizer, conversation, attack_conversation)[0]
+        except TokenMergeError:
+            attack_conversation = [
+                {"role": "user", "content": conversation[0]["content"] + " " + self.config.optim_str_init},
+                {"role": "assistant", "content": conversation[1]["content"]},
+            ]
+            pre_ids, attack_prefix_ids, prompt_ids, attack_suffix_ids, post_ids, target_ids = prepare_conversation(tokenizer, conversation, attack_conversation)[0]
+
+        pre_ids = pre_ids.unsqueeze(0).to(model.device)
+        # attack_prefix_ids = attack_prefix_ids.unsqueeze(0).to(model.device)
+        prompt_ids = prompt_ids.unsqueeze(0).to(model.device)
+        pre_prompt_ids = torch.cat([pre_ids, prompt_ids], dim=1)
+        attack_ids = attack_suffix_ids.unsqueeze(0).to(model.device)
+        post_ids = post_ids.unsqueeze(0).to(model.device)
+        target_ids = target_ids.unsqueeze(0).to(model.device)
+
+        # Embed everything that doesn't get optimized
+        embedding_layer = model.get_input_embeddings()
+        pre_prompt_embeds, post_embeds, target_embeds = [
+            embedding_layer(ids) for ids in (pre_prompt_ids, post_ids, target_ids)
+        ]
+        # Compute the KV Cache for tokens that appear before the optimized tokens
+        if self.config.use_prefix_cache and "gemma" not in model.name_or_path:
+            with torch.no_grad():
+                self.prefix_cache = DynamicCache()
+                output = model(inputs_embeds=pre_prompt_embeds, past_key_values=self.prefix_cache, use_cache=True)
+                self.prefix_cache = output.past_key_values
+            flops_prefill = get_flops(model, pre_prompt_embeds.shape[0]*pre_prompt_embeds.shape[1], 0, "forward")
+        else:
+            self.prefix_cache = None
+            flops_prefill = 0
+
+        self.target_ids = target_ids
+        self.pre_prompt_embeds = pre_prompt_embeds
+        self.post_embeds = post_embeds
+        self.target_embeds = target_embeds
+
+        if self.config.grow_target:
+            self.target_length = 1
+        else:
+            self.target_length = target_ids.size(1)
+        # Initialize the attack buffer
+        buffer, flops_init = self.init_buffer(model, attack_ids)
+        optim_ids = buffer.get_best_ids()
+        token_selection = SubstitutionSelectionStrategy(
+            self.config,
+            self.prefix_cache,
+            self.pre_prompt_embeds,
+            self.post_embeds,
+            self.target_embeds,
+            self.target_ids, self.not_allowed_ids, self.tokenizer
+        )
+        losses = []
+        times = []
+        flops = []
+        optim_strings = []
+        self.stop_flag = False
+        current_loss = buffer.get_lowest_loss()
+
+        for i in (pbar := trange(self.config.num_steps, file=sys.stdout)):
+            current_loss, time_for_step, optim_ids, optim_str, flops_for_step = self._single_step(model, tokenizer, conversation, token_selection, buffer, optim_ids)
+            losses.append(current_loss)
+            times.append(time_for_step)
+            optim_strings.append(optim_str)
+            if i == 0:
+                flops.append(flops_for_step + flops_prefill + flops_init)
+            else:
+                flops.append(flops_for_step)
+            pbar.set_postfix({"Loss": current_loss, "# TGT Toks": self.target_length, "Best Attack": optim_str[:80]})
+
+            if self.stop_flag:
+                self.logger.info("Early stopping due to finding a perfect match.")
+                break
+
+        token_list = []
+        attack_conversations = []
+        for attack in optim_strings:
+            attack_conversation = [
+                {"role": "user", "content": conversation[0]["content"] + attack},
+                {"role": "assistant", "content": ""},
+            ]
+            tokens = prepare_conversation(tokenizer, conversation, attack_conversation)[0]
+            token_list.append(torch.cat(tokens[:5]))
+            attack_conversations.append(attack_conversation)
+        batch_completions = generate_ragged_batched(
+            model,
+            tokenizer,
+            token_list=token_list,
+            initial_batch_size=len(token_list),
+            max_new_tokens=self.config.generation_config.max_new_tokens,
+            temperature=self.config.generation_config.temperature,
+            top_p=self.config.generation_config.top_p,
+            top_k=self.config.generation_config.top_k,
+            num_return_sequences=self.config.generation_config.num_return_sequences,
+        )  # (N_steps, N_return_sequences, T)
+        steps = []
+        t1 = time.time()
+        for i in range(len(optim_strings)):
+            step = AttackStepResult(
+                step=i,
+                model_completions=batch_completions[i],
+                time_taken=times[i],
+                loss=losses[i],
+                flops=flops[i],
+                model_input=attack_conversations[i],
+                model_input_tokens=token_list[i].tolist(),
+            )
+            steps.append(step)
+
+        run = SingleAttackRunResult(
+            original_prompt=conversation,
+            steps=steps,
+            total_time=t1 - t0,
+        )
+        return run
+
+    def _single_step(self, model, tokenizer, conversation, token_selection, buffer, optim_ids):
+        """
+        Single step of the GCG attack.
+        One step of the attack is defined as:
+        1. Selecting the next token to replace
+        2. Generating completions for the selected token
+
+
+        Args:
+            model: The model to attack.
+            tokenizer: The tokenizer to use.
+            conversation: The conversation to attack.
+            token_selection: The token selection strategy to use.
+            buffer: The buffer to use.
+            optim_ids: The initial optim_ids to use.
+        """
+        t0a = time.time()
+
+        # Setup target for token selection
+        token_selection.target_ids = self.target_ids[:, :self.target_length]
+        token_selection.target_embeds = self.target_embeds[:, :self.target_length]
+
+        # Compute the token gradient
+        sampled_ids, sampled_ids_pos, grad, flops_select = token_selection(
+            optim_ids.squeeze(0),
+            model,
+            self.config.search_width,
+            self.config.topk,
+            self.config.n_replace,
+        )
+
+        with torch.no_grad():
+            # Sample candidate token sequences
+            if self.config.filter_ids:
+                # We're trying to be as strict as possible here, so we filter
+                # the entire prompt, not just the attack sequence in an isolated
+                # way. This is because the prompt and attack can affect each
+                # other's tokenization in some cases.
+                idx = filter_suffix(
+                    tokenizer,
+                    conversation,
+                    [[None, sampled_ids.cpu()]],
+                )
+                sampled_ids = sampled_ids[idx]
+                sampled_ids_pos = sampled_ids_pos[idx]
+            t_filter_end = time.time()
+
+            # Compute loss on candidates
+            compute_loss_fn = partial(self.compute_candidates_loss, model)
+            loss, acc, flops_loss = with_max_batchsize(compute_loss_fn, sampled_ids)
+
+            torch.cuda.synchronize()  # Ensure GPU computation is complete
+            flops_loss = flops_loss.sum().item()
+            t_loss_end = time.time()
+
+            # Select best candidate and update buffer
+            current_loss = loss.min().item()
+            optim_ids = sampled_ids[loss.argmin()].unsqueeze(0)
+            if self.config.grow_target and acc[loss.argmin()]:
+                self.target_length += 1
+            # Update the buffer based on the loss
+            flops_for_step = (flops_select + flops_loss)
+            if buffer.size == 0 or current_loss < buffer.get_highest_loss():
+                buffer.add(current_loss, optim_ids)
+
+        # Get best IDs from buffer and decode
+        optim_ids = buffer.get_best_ids()
+        optim_str = tokenizer.batch_decode(optim_ids)[0]
+
+        return current_loss, time.time() - t0a, optim_ids, optim_str, flops_for_step
 
     def init_buffer(self, model, init_buffer_ids):
         config = self.config
@@ -452,9 +493,6 @@ class GCGAttack(Attack):
             loss : Tensor, shape = (B,)
                 the GCG loss on all candidate sequences
         """
-
-        all_loss = []
-        all_acc = []
         B = attack_ids.shape[0]
         T = self.pre_prompt_embeds.size(1)
         if self.prefix_cache:
@@ -498,12 +536,9 @@ class GCGAttack(Attack):
         shift_logits = logits[..., tmp - 1 : -1, :].contiguous()
         shift_labels = self.target_ids[:, :self.target_length].repeat(B, 1)
 
-        loss = compute_loss(shift_logits, shift_labels, self.config.loss, self.config.mellowmax_alpha, self.not_allowed_ids, self.tokenizer)
+        loss = compute_loss(shift_logits, shift_labels, self.config.loss, self.config.mellowmax_alpha, self.not_allowed_ids, self.tokenizer)  # (B,)
 
         acc = (shift_logits.argmax(-1) == shift_labels).all(-1)  # (B, T) -> (B,)
-        loss = loss.view(B, -1).mean(dim=-1)
-        all_loss.append(loss)
-        all_acc.append(acc)
 
         if self.config.early_stop:
             if acc.any().item():
@@ -513,7 +548,7 @@ class GCGAttack(Attack):
         gc.collect()
         torch.cuda.empty_cache()
 
-        return torch.cat(all_loss, dim=0), torch.cat(all_acc, dim=0), torch.tensor(flops).expand_as(loss)
+        return loss, acc, torch.tensor(flops).expand_as(loss)
 
 
 class AttackBuffer:
@@ -544,9 +579,9 @@ class AttackBuffer:
 
 
 class SubstitutionSelectionStrategy:
-    def __init__(self, strategy: str, config: GCGConfig, prefix_cache: list[tuple[Tensor, Tensor]], pre_prompt_embeds: Tensor, post_embeds: Tensor, target_embeds: Tensor, target_ids: Tensor, not_allowed_ids: Tensor, tokenizer: PreTrainedTokenizer):
+    def __init__(self, config: GCGConfig, prefix_cache: list[tuple[Tensor, Tensor]], pre_prompt_embeds: Tensor, post_embeds: Tensor, target_embeds: Tensor, target_ids: Tensor, not_allowed_ids: Tensor, tokenizer: PreTrainedTokenizer):
         self.config = config
-        self.strategy = strategy
+        self.strategy = config.token_selection
         self.prefix_cache = prefix_cache
         self.pre_prompt_embeds = pre_prompt_embeds
         self.post_embeds = post_embeds
@@ -563,7 +598,6 @@ class SubstitutionSelectionStrategy:
         search_width: int,
         topk: int,
         n_replace: int,
-        not_allowed_ids: Tensor,
         *args,
         **kwargs,
     ):
@@ -764,28 +798,37 @@ class SubstitutionSelectionStrategy:
         Returns:
             sampled_ids : Tensor, shape = (search_width, n_optim_ids)
                 sampled token ids
+            sampled_ids_pos : Tensor, shape = (search_width, 1)
+                the positions of the sampled token ids
+            grad : Tensor, shape = (N, V)
+                the gradient of the GCG loss computed with respect to the one-hot token embeddings
+            flops : int
+                the number of floating-point operations
         """
         # Sample search_width//ids.shape[0] substitutions at each position
-        samples_per_position = search_width // ids.shape[0]
-        positions = torch.arange(ids.shape[0], device=ids.device)
-        original_ids = ids.repeat(search_width, 1)
+        N = ids.shape[0]
+        V = model.get_input_embeddings().weight.size(0)
+        samples_per_position = search_width // N
+
+        positions = torch.arange(N, device=ids.device) # (N,)
+        original_ids = ids.repeat(search_width, 1) # (search_width, N)
 
         # Get valid ids for each position (all except not_allowed_ids)
-        valid_ids = torch.ones((ids.shape[0], model.get_input_embeddings().weight.size(0)), dtype=torch.bool, device=ids.device)
+        valid_ids = torch.ones((N, V), dtype=torch.bool, device=ids.device)
         if self.not_allowed_ids is not None:
             valid_ids[:, self.not_allowed_ids.to(ids.device)] = False
 
         # Sample indices for each position in parallel
-        sampled_ids = torch.empty((ids.shape[0], samples_per_position), dtype=torch.long, device=ids.device)
-        rand_perm = torch.argsort(torch.rand_like(valid_ids.float()), dim=1)
-        valid_perm = torch.masked_select(rand_perm, valid_ids).reshape(ids.shape[0], -1)
+        sampled_ids = torch.empty((N, samples_per_position), dtype=torch.long, device=ids.device) # (N, samples_per_position)
+        rand_perm = torch.argsort(torch.rand_like(valid_ids.float()), dim=1) # (N, V)
+        valid_perm = torch.masked_select(rand_perm, valid_ids).reshape(N, -1) # (N, samples_per_position)
         sampled_ids = valid_perm[:, :samples_per_position]
 
         # Reshape to (total_samples, 1) format
         sampled_topk_idx = sampled_ids.reshape(-1)
         sampled_ids_pos = positions.repeat_interleave(samples_per_position)
-        original_ids = original_ids[:samples_per_position * ids.shape[0]]
-        new_ids = original_ids.scatter_(1, sampled_ids_pos.unsqueeze(1), sampled_topk_idx.unsqueeze(1))
+        original_ids = original_ids[:samples_per_position * N] # (search_width * N,)
+        new_ids = original_ids.scatter_(1, sampled_ids_pos.unsqueeze(1), sampled_topk_idx.unsqueeze(1)) # (search_width * N,) -> (search_width, N)
         return new_ids, sampled_ids_pos, None, 0
 
     def _lowest_gradient_magnitude(
@@ -881,6 +924,8 @@ class SubstitutionSelectionStrategy:
             ) @ embedding_layer.weight
         else:
             optim_embeds = optim_ids_onehot @ embedding_layer.weight
+        if hasattr(embedding_layer, "embed_scale"):  # For gemma
+            optim_embeds = optim_embeds * embedding_layer.embed_scale.to(optim_embeds)
 
         B = optim_embeds.shape[0]
         if self.prefix_cache:

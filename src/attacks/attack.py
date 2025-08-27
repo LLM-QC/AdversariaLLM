@@ -7,8 +7,8 @@ import transformers
 from beartype import beartype
 from beartype.typing import Literal, Optional, Generic, TypeVar
 
-from src.dataset import PromptDataset
-from src.types import Conversation
+from ..dataset import PromptDataset
+from ..types import Conversation
 
 
 @dataclass
@@ -92,7 +92,7 @@ class Attack(Generic[AttRes]):
         transformers.set_seed(config.seed)
 
     @classmethod
-    def from_name(cls, name):
+    def from_name(cls, name: str) -> "Attack":
         match name:
             case "actor":
                 from .actor import ActorAttack
@@ -122,10 +122,10 @@ class Attack(Generic[AttRes]):
                 from .gcg import GCGAttack
 
                 return GCGAttack
-            case "gcg_judge":
-                from .gcg_judge import GCGJudgeAttack
+            case "gcg_reinforce":
+                from .gcg_reinforce import GCGReinforceAttack
 
-                return GCGJudgeAttack
+                return GCGReinforceAttack
             case "gcg_refusal":
                 from .gcg_refusal import GCGRefusalAttack
 
@@ -142,7 +142,7 @@ class Attack(Generic[AttRes]):
                 from .pgd import PGDAttack
 
                 return PGDAttack
-            case "pgd_one_hot":
+            case "pgd_discrete":
                 from .pgd_discrete import PGDDiscreteAttack
 
                 return PGDDiscreteAttack

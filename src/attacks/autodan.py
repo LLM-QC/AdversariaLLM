@@ -17,13 +17,12 @@ from typing import Optional
 
 import numpy as np
 import torch
-from accelerate.utils import find_executable_batch_size
 from tqdm import trange
 
-from src.attacks.attack import (Attack, AttackResult, AttackStepResult,
-                                GenerationConfig, SingleAttackRunResult)
-from src.io_utils import load_model_and_tokenizer
-from src.lm_utils import (generate_ragged_batched, get_flops, get_losses_batched,
+from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
+                     SingleAttackRunResult)
+from ..io_utils import load_model_and_tokenizer
+from ..lm_utils import (generate_ragged_batched, get_flops, get_losses_batched,
                           prepare_conversation)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -71,7 +70,7 @@ class AutoDANAttack(Attack):
             mutate_model = HuggingFace(
                 self.config.mutate_model.id,
                 self.config.mutate_model,
-            ).to(device).eval()
+            )
         else:
             mutate_model = HuggingFace(model, tokenizer)
 
@@ -122,7 +121,8 @@ class AutoDANAttack(Attack):
 
                 token_list = [torch.cat(t) for t in tokens]
                 targets = [t.roll(-1, 0) for t in token_list]
-                loss = get_losses_batched(model, targets, token_list=token_list)
+                with torch.no_grad():
+                    loss = get_losses_batched(model, targets, token_list=token_list)
                 flops += get_flops(model, sum(len(t) for t in token_list), 0, "forward")
                 loss = torch.tensor([l[-tl:].mean().item() for l, tl in zip(loss, [t[-1].size(0) for t in tokens])])
 

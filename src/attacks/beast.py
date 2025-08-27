@@ -21,9 +21,9 @@ from tqdm import trange
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult)
-from src.lm_utils import (generate_ragged_batched, get_disallowed_ids, get_flops,
+from ..lm_utils import (generate_ragged_batched, get_disallowed_ids, get_flops,
                           prepare_conversation, with_max_batchsize)
-from src.types import Conversation
+from ..types import Conversation
 
 
 @dataclass
@@ -99,6 +99,7 @@ class BEASTAttack(Attack):
 
             initial_ppl, flops_ppl = self.get_perplexity(
                 model,
+                tokenizer,
                 pre_tokens,
                 prompt_tokens,
                 [attack_tokens],
@@ -106,23 +107,12 @@ class BEASTAttack(Attack):
                 target_tokens,
             )
             initial_ppl = initial_ppl[0]
-
-            # Initial sampling
-            beams, flops_sample = self.sample(
-                model,
-                k=self.config.k1,
-                pre_tokens=pre_tokens,
-                prompt_tokens=prompt_tokens,
-                attack_token_list=[attack_tokens],
-                post_tokens=post_tokens,
-            )  # shape is (k1,)
-            beams = beams[0]
-            flops = flops_prefix + flops_ppl + flops_sample
+            flops = flops_prefix + flops_ppl
             per_sample_attacks = [""]
             per_sample_times = [time.time() - t0]
             per_sample_losses = [torch.log(torch.tensor(initial_ppl)).item()]
             per_sample_flops = [flops]
-            beams: list[torch.LongTensor] = [torch.LongTensor([]) for b in beams]
+            beams: list[torch.LongTensor] = [torch.LongTensor([]) for _ in range(self.config.k1)]
             for i in (pbar := trange(1, self.config.num_steps, file=sys.stdout)):
                 flops = 0
                 t1 = time.time()
@@ -144,6 +134,7 @@ class BEASTAttack(Attack):
                 # Score candidates
                 scores, flops_ppl = self.get_perplexity(
                     model,
+                    tokenizer,
                     pre_tokens,
                     prompt_tokens,
                     candidates,
@@ -233,6 +224,7 @@ class BEASTAttack(Attack):
     def get_perplexity(
         self,
         model,
+        tokenizer,
         pre_tokens,
         prompt_tokens,
         attack_tokens_list,
@@ -249,7 +241,12 @@ class BEASTAttack(Attack):
             # Calculate padding needed
             if padding_length > 0:
                 # Create padding tensor with pad token ID (usually 0)
-                padding = torch.zeros(padding_length, dtype=attack_tokens.dtype, device=attack_tokens.device)
+                padding = torch.full(
+                    (padding_length,),
+                    tokenizer.pad_token_id,
+                    dtype=attack_tokens.dtype,
+                    device=attack_tokens.device
+                )
                 # Concatenate attack tokens with padding
                 padded_attack = torch.cat([attack_tokens, padding])
                 padded_attack_tokens_list.append(padded_attack)
@@ -335,7 +332,7 @@ class BEASTAttack(Attack):
 
             # Expand cache to match batch size
             cache = copy.deepcopy(self.prefix_cache)
-            for i in range(len(cache)):
+            for i in range(len(cache.key_cache)):
                 cache.key_cache[i] = cache.key_cache[i].expand(tensor.size(0), -1, -1, -1)
                 cache.value_cache[i] = cache.value_cache[i].expand(tensor.size(0), -1, -1, -1)
         else:

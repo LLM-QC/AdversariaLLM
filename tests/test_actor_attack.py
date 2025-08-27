@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
-from src.attacks.actor import HuggingFaceModel, ActorAttack
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from src.attacks.actor import ActorAttack
+from src.io_utils import load_model_and_tokenizer
 
 
 def test_harm_extraction():
@@ -28,12 +28,31 @@ def test_harm_extraction():
     # cfg.actor.attack_model.use_api = True
     # cfg.actor.attack_model["model_name"] = "gpt-4o"
 
-    attack = ActorAttack(cfg.actor)
+    # Manually set the seed to fix interpolation issue
+    cfg.actor.seed = 0
+    # Also need to set generation_config and max_new_tokens
+    cfg.actor.generation_config = cfg._default.generation_config
+    cfg.actor.max_new_tokens = cfg._default.generation_config.max_new_tokens
 
-    # model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
-    model_name = "mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+    try:
+        attack = ActorAttack(cfg.actor)
 
-    attack.run(model, tokenizer, dataset)
- 
+        # Create model config matching the structure from models.yaml
+        model_config = OmegaConf.create({
+            "id": "mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated",
+            "tokenizer_id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "short_name": "Llama",
+            "developer_name": "mlabonne",
+            "compile": False,
+            "dtype": "bfloat16",
+            "chat_template": "llama-3-instruct",
+            "trust_remote_code": True
+        })
+        model, tokenizer = load_model_and_tokenizer(model_config)
+        attack.run(model, tokenizer, dataset)
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+

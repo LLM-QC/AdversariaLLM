@@ -8,8 +8,9 @@ import time
 import torch
 import transformers
 
-from src.attacks.attack import Attack, GenerationConfig, AttackResult, AttackStepResult, SingleAttackRunResult
-from src.lm_utils import generate_ragged_batched, get_losses_batched, prepare_conversation
+from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
+                     SingleAttackRunResult)
+from ..lm_utils import generate_ragged_batched, get_losses_batched, prepare_conversation
 
 
 @dataclass
@@ -96,9 +97,10 @@ class HumanJailbreaksAttack(Attack):
         t_start_loss = time.time()
 
         # Calculate loss for the full sequences
-        all_losses_per_token_flat = get_losses_batched(
-            model, targets=shifted_target_tensors_flat, token_list=full_token_tensors_list_flat, initial_batch_size=B
-        )  # (B*N, T)
+        with torch.no_grad():
+            all_losses_per_token_flat = get_losses_batched(
+                model, targets=shifted_target_tensors_flat, token_list=full_token_tensors_list_flat, initial_batch_size=B
+            )  # (B*N, T)
 
         # Extract average loss *only* over the target tokens for each instance
         instance_losses = []

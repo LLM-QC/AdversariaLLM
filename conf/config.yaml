@@ -15,11 +15,19 @@ hydra:
     dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
 
 name: testing
-save_dir: ${root_dir}/outputs/
-embed_dir: ${root_dir}/embeddings/
+save_dir: ${root_dir}/outputs/  # place to store results
+embed_dir: ${root_dir}/embeddings/  # place to store embeddings for emebdding attacks
 overwrite: false
 
-classifiers: ["strong_reject"] # Options: "strong_reject", "cais", "llama_guard_3_8b", "overrefusal", etc. (can be list[str]|null)
+classifiers: ["strong_reject"]  # anything from judgezoo
+
+# Top-level generation config for easier overriding
+generation_config:
+  temperature: 0.0
+  top_p: 1.0
+  top_k: 0
+  max_new_tokens: 256
+  num_return_sequences: 1
 
 # overrides for parallelism
 attack: null

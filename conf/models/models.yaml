@@ -288,6 +288,24 @@ mistralai/Ministral-8B-Instruct-2410:
   dtype: bfloat16
   chat_template: null
   trust_remote_code: True
+openai/gpt-oss-20b:
+  id: openai/gpt-oss-20b
+  tokenizer_id: openai/gpt-oss-20b
+  short_name: GPT
+  developer_name: OpenAI
+  compile: False
+  dtype: null
+  chat_template: null
+  trust_remote_code: True
+openai/gpt-oss-120b:
+  id: openai/gpt-oss-120b
+  tokenizer_id: openai/gpt-oss-120b
+  short_name: GPT
+  developer_name: OpenAI
+  compile: False
+  dtype: null
+  chat_template: null
+  trust_remote_code: True
 /ceph/ssd/staff/beyer/circuit-breakers/out/Llama-3-8b_CB_1/:
   id: /ceph/ssd/staff/beyer/circuit-breakers/out/Llama-3-8b_CB_1/
   tokenizer_id: meta-llama/Meta-Llama-3-8B-Instruct

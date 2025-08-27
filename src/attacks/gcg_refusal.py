@@ -13,9 +13,9 @@ from accelerate.utils import find_executable_batch_size
 from torch import Tensor
 from tqdm import trange
 
-from src.lm_utils import filter_suffix, get_disallowed_ids, generate_ragged_batched, prepare_tokens
-
 from .attack import Attack, AttackResult
+from ..lm_utils import filter_suffix, get_disallowed_ids, generate_ragged_batched, prepare_tokens
+
 
 
 @dataclass
@@ -837,6 +837,8 @@ class SubstitutionSelectionStrategy:
             ) @ embedding_layer.weight
         else:
             optim_embeds = optim_ids_onehot @ embedding_layer.weight
+        if hasattr(embedding_layer, "embed_scale"):  # For gemma
+            optim_embeds = optim_embeds * embedding_layer.embed_scale.to(optim_embeds)
 
         if self.prefix_cache:
             input_embeds = torch.cat(

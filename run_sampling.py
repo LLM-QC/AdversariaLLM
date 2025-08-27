@@ -1,7 +1,9 @@
-"""This file can be used to generate additional completions for attack runs which are
-already finished.
+"""This file can be used to generate new completions for attack runs using a
+specified generation_config from conf/sampling.yaml.
 
-The easiest way to implement the filtering is using the sampling.yaml config.
+The script filters runs based on the filter_by configuration and generates
+completions from scratch using the generation_config, replacing all existing
+completions and removing scores.
 
 Example:
 
@@ -12,8 +14,12 @@ filter_by:
     - gcg
     - pgd
 
-The script also accepts a `num_return_sequences` argument, which specifies how many
-completions the runs should have in the end.
+generation_config:
+  temperature: 0.0
+  top_p: 1.0
+  top_k: 0
+  max_new_tokens: 256
+  num_return_sequences: 1
 """
 import os
 from datetime import datetime
@@ -33,7 +39,7 @@ from src.dataset import json
 from src.errors import print_exceptions
 from src.io_utils import (CompactJSONEncoder, RunConfig, free_vram, get_filtered_and_grouped_paths,
                           get_mongodb_connection, load_model_and_tokenizer, filter_config)
-from src.judges import Judge
+from judgezoo import Judge
 from src.lm_utils import generate_ragged_batched
 
 torch.use_deterministic_algorithms(True, warn_only=True)
@@ -101,6 +107,7 @@ def main(cfg: DictConfig) -> None:
     if not paths:
         logging.info("No paths found, exiting")
         return
+    logging.info(f"Found {len(paths)} paths")
 
     n = 0
     pbar = tqdm(paths, file=sys.stdout)
@@ -116,13 +123,11 @@ def main(cfg: DictConfig) -> None:
             with open(path, "r") as f:
                 attack_run = json.load(f)
 
-            gen_config = attack_run["config"]["attack_params"]["generation_config"]
-            n_already_generated = gen_config["num_return_sequences"]
-            n_to_generate = max(cfg.num_return_sequences - n_already_generated, 0)
-            if n_to_generate == 0:
-                logging.info(f"Skipping {path}, it already has {n_already_generated} completions")
-                continue
-            attack_run["config"]["attack_params"]["generation_config"]["num_return_sequences"] = cfg.num_return_sequences
+            # Use the generation config from the YAML file instead of the original
+            new_gen_config = OmegaConf.to_container(cfg.generation_config)
+
+            # Update the attack run config to use the new generation config
+            attack_run["config"]["attack_params"]["generation_config"] = new_gen_config
             run_config = RunConfig(
                 model=attack_run["config"]["model"],
                 dataset=attack_run["config"]["dataset"],
@@ -131,6 +136,7 @@ def main(cfg: DictConfig) -> None:
                 dataset_params=OmegaConf.structured(attack_run["config"]["dataset_params"]),
                 attack_params=OmegaConf.structured(attack_run["config"]["attack_params"]),
             )
+
             run_config = filter_config(run_config, -1)
             if run_config is None:
                 continue
@@ -140,39 +146,36 @@ def main(cfg: DictConfig) -> None:
                 last_model_params = model_params
                 del model, tokenizer
                 free_vram()
-                try:
-                    raise Exception("test")
-                    # need to leave space for judging
-                    model, tokenizer = (LLM(model=model_params.id, gpu_memory_utilization=0.8), None)
-                    backend = "vllm"
-                except Exception as e:
-                    model, tokenizer = load_model_and_tokenizer(model_params)
-                    backend = "hf"
+                model, tokenizer = load_model_and_tokenizer(model_params)
+                backend = "hf"
 
-            # lets generate however many new ones we need
+            # Generate new completions from scratch using the new generation config
             for subrun in attack_run["runs"]:
                 tokens = []
                 classifiers = set()
                 for step in subrun["steps"]:
                     tokens.append(torch.tensor(step["model_input_tokens"]))
-                    classifiers.update(list(step["scores"].keys()))
-                logging.info(f"Generating {len(subrun['steps'])}x{n_to_generate} completions.")
+                    # Check which judges were used in the original file
+                    if "scores" in step:
+                        classifiers.update(list(step["scores"].keys()))
+                logging.info(f"Generating {len(subrun['steps'])}x{new_gen_config['num_return_sequences']} completions.")
 
-                additional_completions = gen_function[backend](
+                new_completions = gen_function[backend](
                     model,
                     tokenizer,
                     tokens,
                     initial_batch_size=None,
-                    num_return_sequences=n_to_generate,
-                    max_new_tokens=gen_config["max_new_tokens"],
-                    temperature=gen_config["temperature"],
-                    top_p=gen_config["top_p"],
-                    top_k=gen_config["top_k"],
+                    num_return_sequences=new_gen_config["num_return_sequences"],
+                    max_new_tokens=new_gen_config["max_new_tokens"],
+                    temperature=new_gen_config["temperature"],
+                    top_p=new_gen_config["top_p"],
+                    top_k=new_gen_config["top_k"],
                     verbose=True
                 )  # (n_steps, n_to_generate)
 
-                # have to also add classifier scores for new completions
+                # Judge the new completions using the same judges as the original file
                 prompt = subrun["original_prompt"]
+                n_to_generate = new_gen_config["num_return_sequences"]
                 for classifier in classifiers:
                     if classifier != last_judge:
                         last_judge = classifier
@@ -181,7 +184,7 @@ def main(cfg: DictConfig) -> None:
                         judge = Judge.from_name(classifier)
                         print(judge.classifier.device)
                     modified_prompts = []
-                    for completions in additional_completions:
+                    for completions in new_completions:
                         for completion in completions:
                             modified_prompt = copy.deepcopy(prompt)
                             if modified_prompt[-1]["role"] == "assistant":
@@ -189,19 +192,29 @@ def main(cfg: DictConfig) -> None:
                             else:
                                 modified_prompt.append({"role": "assistant", "content": completion})
                             modified_prompts.append(modified_prompt)
+
                     results = judge(modified_prompts, verbose=True)
                     if all(r is None for r in results):
                         continue
                     i = 0
                     for step in subrun["steps"]:
+                        # Initialize scores dict if it doesn't exist
+                        if "scores" not in step:
+                            step["scores"] = {}
+                        if classifier not in step["scores"]:
+                            step["scores"][classifier] = {}
                         for k, v in results.items():
-                            step["scores"][classifier][k].extend(v[i:i+n_to_generate])
+                            if k not in step["scores"][classifier]:
+                                step["scores"][classifier][k] = []
+                            step["scores"][classifier][k] = v[i:i+n_to_generate]
                         i += n_to_generate
+                if len(classifiers) > 1:
+                    del judge
+                    free_vram()
 
-                for step, completions in zip(subrun["steps"], additional_completions):
-                    assert len(completions) == n_to_generate
-                    step["model_completions"].extend(completions)
-                    assert len(step["model_completions"]) == cfg.num_return_sequences
+                # Replace model_completions with new ones
+                for step, completions in zip(subrun["steps"], new_completions):
+                    step["model_completions"] = completions
                     n += n_to_generate
 
                 pbar.set_description(f"{len(subrun['steps']) * n_to_generate} | {n} total")
@@ -213,6 +226,7 @@ def main(cfg: DictConfig) -> None:
             log_file = os.path.join(log_dir, str(i), f"run.json")
             os.makedirs(os.path.dirname(log_file), exist_ok=True)
             json.dump(attack_run, open(log_file, "w"), indent=2, cls=CompactJSONEncoder)
+            logging.info(f"Saved to {log_file}")
 
             db = get_mongodb_connection()
             collection = db.runs
@@ -220,7 +234,7 @@ def main(cfg: DictConfig) -> None:
             # Find all entries that match the original log_file path
             matching_entries = list(collection.find({"log_file": path}))
 
-            # Create new entries with updated log_file and num_return_sequences
+            # Create new entries with updated log_file and generation_config
             new_entries = []
             for entry in matching_entries:
                 new_entry = entry.copy()
@@ -229,8 +243,8 @@ def main(cfg: DictConfig) -> None:
                     del new_entry["_id"]
                 # Update the log_file to the new path
                 new_entry["log_file"] = log_file
-                # Update the num_return_sequences in the config
-                new_entry["config"]["attack_params"]["generation_config"]["num_return_sequences"] = cfg.num_return_sequences
+                # Update the generation_config in the config to match the new one used
+                new_entry["config"]["attack_params"]["generation_config"] = new_gen_config
                 new_entries.append(new_entry)
 
             # Insert the new entries if any were found

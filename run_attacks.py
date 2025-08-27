@@ -8,12 +8,12 @@ import hydra
 import torch
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
-from src.attacks import Attack
+from run_judges import run_judges
+from src.attacks import Attack, AttackResult
 from src.dataset import PromptDataset
 from src.errors import print_exceptions
-from src.io_utils import load_model_and_tokenizer, log_attack, RunConfig, filter_config
-from src.lm_utils import free_vram
-from run_judges import run_judges
+from src.io_utils import (RunConfig, filter_config, free_vram, load_model_and_tokenizer,
+                          log_attack)
 
 torch.use_deterministic_algorithms(True, warn_only=True)
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -73,7 +73,7 @@ def run_attacks(all_run_configs: list[RunConfig], cfg: DictConfig, date_time_str
             logging.info(f"Attack: {run_config.attack}\n{OmegaConf.to_yaml(run_config.attack_params, resolve=True)}")
             last_attack = run_config.attack
 
-        attack = Attack.from_name(run_config.attack)(run_config.attack_params)
+        attack: Attack[AttackResult] = Attack.from_name(run_config.attack)(run_config.attack_params)
         results = attack.run(model, tokenizer, dataset)
 
         log_attack(run_config, results, cfg, date_time_string)
@@ -94,12 +94,10 @@ def main(cfg: DictConfig) -> None:
     # This way we don't re-run the attacks when only the classifiers change
     judges_to_run = cfg.pop('classifiers')
     OmegaConf.set_struct(cfg, True)
-
     all_run_configs = collect_configs(cfg)
 
     # 2. Run the attacks
     run_attacks(all_run_configs, cfg, date_time_string)
-
     # 3. Run the judges
     if judges_to_run is None:
         return
@@ -107,12 +105,12 @@ def main(cfg: DictConfig) -> None:
         # Create judge config
         judge_cfg = OmegaConf.create({
             "classifier": judge,
-            "suffixes": [date_time_string.split('/')[-1]],  # Use the timestamp from this run
+            "suffixes": [date_time_string.split('/')[-1]],  # Use the timestamp from this run to make sure we only judge this run
+            "filter_by": None
         })
         free_vram()
         # Run the judge
         run_judges(judge_cfg)
-
 
 if __name__ == "__main__":
     main()

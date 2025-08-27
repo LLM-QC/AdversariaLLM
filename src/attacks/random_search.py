@@ -17,9 +17,9 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import trange
 
-from src.attacks import (Attack, AttackResult, AttackStepResult,
-                         GenerationConfig, SingleAttackRunResult)
-from src.lm_utils import (generate_ragged_batched, get_disallowed_ids,
+from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
+                     SingleAttackRunResult)
+from ..lm_utils import (generate_ragged_batched, get_disallowed_ids,
                           prepare_conversation, with_max_batchsize)
 
 

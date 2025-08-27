@@ -11,7 +11,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, List, Dict
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -19,10 +19,11 @@ from torch.nn.utils.rnn import pad_sequence
 from tqdm import trange
 from transformers import AutoModelForCausalLM, PreTrainedTokenizer
 
-from src.attacks import (Attack, AttackResult, AttackStepResult,
-                         GenerationConfig, SingleAttackRunResult)
-from src.lm_utils import (generate_ragged_batched, prepare_conversation,
-                          with_max_batchsize, TokenMergeError, get_disallowed_ids)
+from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
+                     SingleAttackRunResult)
+from ..lm_utils import (TokenMergeError, generate_ragged_batched, get_disallowed_ids,
+                          prepare_conversation, with_max_batchsize)
+
 
 @dataclass
 class OptimizerConfig:
@@ -92,6 +93,8 @@ class PGDAttack(Attack):
         # be saved to disk. Future runs should be able to use the config to avoid duplications.
         if self.config.embedding_scale is None:
             embeddings = model.get_input_embeddings().weight
+            if hasattr(model.get_input_embeddings(), "embed_scale"):  # For gemma
+                embeddings = embeddings * model.get_input_embeddings().embed_scale.to(embeddings)
             if self.config.projection == "l2":
                 self.embedding_scale = embeddings.norm(dim=-1).mean().item()
             elif self.config.projection == "l1":
@@ -233,7 +236,7 @@ class PGDAttack(Attack):
                 output_hidden_states=True
             )
 
-            loss = self._calculate_loss(outputs.logits, y_batch, target_masks_batch)
+            loss = self._calculate_loss(outputs.logits, y_batch, target_masks_batch, tokenizer)
 
             kl_div_loss = 0.0
             if original_model is not None and (self.config.tie_logits > 0 or self.config.tie_features > 0):
@@ -250,7 +253,7 @@ class PGDAttack(Attack):
             with torch.no_grad():
                 grad = self._modify_gradient(grad, attack_masks_batch, disallowed_ids)
                 perturbed_embeddings_or_one_hot = self._perform_optimizer_step(
-                    optimizer,perturbed_embeddings_or_one_hot, original_embeddings, grad, attack_masks_batch, step
+                    optimizer, perturbed_embeddings_or_one_hot, original_embeddings, grad, attack_masks_batch, step
                 )
 
             model.zero_grad()
@@ -323,15 +326,18 @@ class PGDAttack(Attack):
 
     def _maybe_convert_to_embeddings(self, embeddings_or_one_hot, model):
         if self.config.attack_space == "one-hot":
-            return embeddings_or_one_hot @ model.get_input_embeddings().weight
+            embeddings = embeddings_or_one_hot @ model.get_input_embeddings().weight
+            if hasattr(model.get_input_embeddings(), "embed_scale"):  # For gemma
+                embeddings = embeddings * model.get_input_embeddings().embed_scale.to(embeddings)
+            return embeddings
         else:
             return embeddings_or_one_hot
 
-    def _calculate_loss(self, logits, targets, mask):
+    def _calculate_loss(self, logits, targets, mask, tokenizer=None):
         if self.config.loss == "ce":
             return self._calculate_ce_loss(logits, targets, mask)
-        elif self.config.loss == "entropy_adaptive":
-            return self._calculate_entropy_adaptive_loss(logits, mask)
+        elif self.config.loss == "entropy_allowed":
+            return self._calculate_entropy_allowed_loss(logits, mask, tokenizer=tokenizer)
         elif self.config.loss == "entropy_first_token":
             return self._calculate_entropy_first_token_loss(logits, mask)
         else:
@@ -347,51 +353,49 @@ class PGDAttack(Attack):
         loss = loss.sum(dim=1) / (mask.sum(dim=1).float() + 1e-6)  # (B,)
         return loss
 
-    def _calculate_entropy_adaptive_loss(self,
+    def _calculate_entropy_allowed_loss(self,
                                 logits: torch.Tensor,
                                 mask:   torch.Tensor,
-                                adaptive_threshold: float = 0.7) -> torch.Tensor:
+                                tokenizer=None) -> torch.Tensor:
         """
-        * maximise entropy of the **first** token (→ encourage diverse samples)
-        * once we are getting diverse samples (max p < `adaptive_threshold`) we also
-        minimise entropy on the remaining tokens (→ encourage coherence)
+        KL divergence loss to encourage uniform distribution over allowed tokens
+        on the first token position.
 
         Args
         ----
         logits : (B, L, V)  un-normalised logits
         mask   : (B, L)     1 = real token, 0 = padding
-        adaptive_threshold : float
-            confidence level that triggers the “low-entropy after the first
-            token” term (defaults to 0.7)
+        adaptive_threshold : float (unused, kept for compatibility)
 
         Returns
         -------
         loss : (B,)   one scalar per sequence in the batch
         """
-        # ---- probabilities & entropy -----------------------------------------
-        log_probs = F.log_softmax(logits, dim=-1)  # (B, L, D)
-        probs = log_probs.exp()  # (B, L, D)
-        entropy = -(probs * log_probs).sum(dim=-1)  # (B, L)
+        disallowed_ids = get_disallowed_ids(tokenizer, allow_non_ascii=False, allow_special=False)
 
-        # ---- first-token (exploration) term -----------------------------------
+        log_probs = F.log_softmax(logits.float(), dim=-1)
+        B, L, D = log_probs.shape
+        N_valid = D - len(disallowed_ids)
+        tgt_dist = torch.full((1, 1, D), device=log_probs.device, fill_value=1 / N_valid)
+        tgt_dist[0, 0, disallowed_ids] = 0
+        model_probs = log_probs.exp()
+        log_tgt = torch.log(tgt_dist + 1e-30)
+
         # Find the first nonzero index of mask for each sequence in the batch
-        # This handles cases where the first token might be padding
         cum_mask = mask.float().cumsum(dim=1)
-
-        # Replace the default first token entropy with the properly masked version
-        first_token_loss = - (entropy * (cum_mask == 1)).sum(dim=1)
         temp_mask = (cum_mask == 1)
-        # Indices of the first tokens for each sequence in the batch
         first_token_indices = temp_mask.nonzero(as_tuple=True)[1]
 
-        # Gather the probabilities at the first token positions for each sequence
-        first_token_probs = probs[torch.arange(probs.size(0), device=probs.device), first_token_indices].max(dim=-1).values
-        under_confident = (first_token_probs < adaptive_threshold)  # (B,)
-        under_confident = under_confident.float()  # (B,)
+        kl_loss = F.kl_div(
+            log_tgt.expand(B, L, -1),
+            model_probs,
+            reduction="none"
+        )  # (B, L, D)
 
-        # ---- entropy on the rest of the tokens (certainty) --------------------
-        rest_entropy = (entropy * ((cum_mask > 1) & (mask == 1))).sum(dim=1) / (mask.sum(dim=1).float() - 1)
-        loss = first_token_loss + under_confident * rest_entropy  # (B,)
+        # Sum over vocabulary dimension and select first token for each sequence
+        kl_loss = kl_loss.sum(dim=-1)  # (B, L)
+        loss = kl_loss[torch.arange(B, device=logits.device), first_token_indices]  # (B,)
+
         return loss
 
     def _calculate_entropy_first_token_loss(self,
@@ -400,8 +404,6 @@ class PGDAttack(Attack):
                                 adaptive_threshold: float = 0.7) -> torch.Tensor:
         """
         * maximise entropy of the **first** token (→ encourage diverse samples)
-        * once we are getting diverse samples (max p < `adaptive_threshold`) we also
-        minimise entropy on the remaining tokens (→ encourage coherence)
 
         Args
         ----
@@ -649,7 +651,6 @@ class PGDAttack(Attack):
         values.clamp_min_(0)
         values.div_(values.norm(dim=-1, keepdim=True, p=p))
         return values
-
 
     @staticmethod
     def _select_embeddings_for_generation(embeddings: torch.Tensor, target_mask: torch.Tensor) -> torch.Tensor:

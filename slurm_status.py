@@ -53,10 +53,10 @@ def check_job_status(job_dir):
         try:
             jobs = get_jobs()
             if job_id in jobs and jobs[job_id] == "PENDING":
-                return "PENDING", "Job is currently pending"
+                return "PENDING", "Job is currently pending", None, None
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass  # squeue not available or timed out
-        return "UNKNOWN", "No log file found"
+        return "UNKNOWN", "No log file found", None, None
 
     log_out = log_files[0]
     log_err = log_out.with_suffix('.err')
@@ -73,36 +73,36 @@ def check_job_status(job_dir):
         last_lines = ''.join(lines[-10:]).lower()
 
         if any("Attack logged to" in line for line in lines):
-            return "SUCCESS", "Completed successfully"
+            return "SUCCESS", "Completed successfully", None, None
         elif any("Skipping" in line and " because it already exists" in line for line in lines):
-            return "SUCCESS", "Skipped, already exists"
+            return "SUCCESS", "Skipped, already exists", None, None
         # Check if log file was modified in the last 2 minutes (job is likely still running)
         if time.time() - os.path.getmtime(log_out) < 120:
-            return "RUNNING", "Job is currently running"
+            return "RUNNING", "Job is currently running", None, None
         # Check if job is still in SLURM queue
         try:
             jobs = get_jobs()
             if job_id in jobs and jobs[job_id] == "RUNNING":
-                return "RUNNING", "Job is currently running"
+                return "RUNNING", "Job is currently running", None, None
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass  # squeue not available or timed out
         if any(word in err_lines for word in ["error", "failed", "exception", "traceback"]):
-            return "FAILED", "Error detected in logs"
+            return "FAILED", "Error detected in logs", str(log_out.resolve()), str(log_err.resolve())
         elif any(word in last_lines for word in ["error", "failed", "exception", "traceback"]):
-            return "FAILED", "Error detected in logs"
+            return "FAILED", "Error detected in logs", str(log_out.resolve()), str(log_err.resolve())
         else:
             # Check the last few lines of the output log
             last_lines = ''.join(err_lines[-10:]).lower()
             if any(word in last_lines for word in ["error", "failed", "exception", "traceback"]):
                 if "out of memory" in last_lines:
-                    return "FAILED", "Out of memory"
+                    return "FAILED", "Out of memory", str(log_out.resolve()), str(log_err.resolve())
                 if "cancelled at" in last_lines:
-                    return "FAILED", "Cancelled"
-                return "FAILED", "Error detected in logs"
-        return "UNKNOWN", "Status unclear"
+                    return "FAILED", "Cancelled", str(log_out.resolve()), str(log_err.resolve())
+                return "FAILED", "Error detected in logs", str(log_out.resolve()), str(log_err.resolve())
+        return "UNKNOWN", "Status unclear", str(log_out.resolve()), str(log_err.resolve())
 
     except Exception as e:
-        return "ERROR", f"Could not read logs: {str(e)}"
+        return "ERROR", f"Could not read logs: {str(e)}", None, None
 
 def get_run_timestamp(run_path):
     """Extract timestamp from run path for sorting"""
@@ -156,15 +156,15 @@ def get_multirun_status(max_runs=20, detailed=False, failed=False):
         # Check status of all jobs in this run
         job_statuses = []
         for job_dir in sorted(job_dirs):
-            status, message = check_job_status(job_dir)
-            job_statuses.append((job_dir.name, status, message))
+            status, message, log_out_path, log_err_path = check_job_status(job_dir)
+            job_statuses.append((job_dir.name, status, message, log_out_path, log_err_path))
 
         # Determine overall run status
-        success_count = sum(1 for _, status, _ in job_statuses if status == "SUCCESS")
-        failed_count = sum(1 for _, status, _ in job_statuses if status == "FAILED")
-        running_count = sum(1 for _, status, _ in job_statuses if status == "RUNNING")
-        pending_count = sum(1 for _, status, _ in job_statuses if status == "PENDING")
-        unknown_count = sum(1 for _, status, _ in job_statuses if status not in ["SUCCESS", "FAILED", "RUNNING", "PENDING"])
+        success_count = sum(1 for _, status, _, _, _ in job_statuses if status == "SUCCESS")
+        failed_count = sum(1 for _, status, _, _, _ in job_statuses if status == "FAILED")
+        running_count = sum(1 for _, status, _, _, _ in job_statuses if status == "RUNNING")
+        pending_count = sum(1 for _, status, _, _, _ in job_statuses if status == "PENDING")
+        unknown_count = sum(1 for _, status, _, _, _ in job_statuses if status not in ["SUCCESS", "FAILED", "RUNNING", "PENDING"])
         total_jobs = len(job_statuses)
 
         if success_count == total_jobs:
@@ -205,15 +205,21 @@ def get_multirun_status(max_runs=20, detailed=False, failed=False):
 
         # Show detailed job info if requested
         if detailed and (failed_count > 0 or running_count > 0 or unknown_count > 0):
-            for job_name, status, message in job_statuses:
+            for job_name, status, message, log_out_path, log_err_path in job_statuses:
                 if status != "SUCCESS":
                     color = Colors.RED if status == "FAILED" else Colors.YELLOW
-                    print(f"    {color}└─ {job_name}: {message}{Colors.END}")
+                    if status == "FAILED" and log_err_path:
+                        print(f"    {color}└─ {job_name}: {message} - {Colors.BLUE}{log_err_path}{Colors.END}")
+                    else:
+                        print(f"    {color}└─ {job_name}: {message}{Colors.END}")
         if not detailed and failed:
-            for job_name, status, message in job_statuses:
+            for job_name, status, message, log_out_path, log_err_path in job_statuses:
                 if status == "FAILED":
                     color = Colors.RED
-                    print(f"    {color}└─ {job_name}: {message}{Colors.END}")
+                    if log_err_path:
+                        print(f"    {color}└─ {job_name}: {message} - {Colors.BLUE}{log_err_path}{Colors.END}")
+                    else:
+                        print(f"    {color}└─ {job_name}: {message}{Colors.END}")
 
     # Print summary
     print(f"\n{Colors.PURPLE}{'='*80}{Colors.END}")
