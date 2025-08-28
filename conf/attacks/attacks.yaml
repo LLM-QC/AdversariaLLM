@@ -7,8 +7,8 @@ actor:
   type: discrete
   placement: multi-turn
   seed: ${attacks._default.seed}
-  generation_config: ${attacks._default.generation_config}
-  version: 0.0.4
+  max_new_tokens: 2048
+  version: 0.0.6
   attack_model:
     temperature: 0.0
     use_api: false
