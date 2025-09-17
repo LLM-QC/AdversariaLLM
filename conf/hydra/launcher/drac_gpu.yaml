@@ -2,7 +2,7 @@ defaults:
   - submitit_slurm
 
 _target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
-account: def-bengioy
+account: rrg-bengioy-ad
 timeout_min: 500 # 3h: 180m; 5h: 300m
 tasks_per_node: 1
 nodes: 1
@@ -13,6 +13,6 @@ additional_parameters: {}
 setup: 
   - "export HF_HUB_OFFLINE=1"
 mem_gb: 8
-gres: gpu:1
+gres: gpu:h100:1
 cpus_per_task: 2
 array_parallelism: 24

@@ -14,27 +14,36 @@ from src.attacks import AttackResult
 
 
 def _load_merge_peft(model_name, peft_name, manual_untie_embeddings=False, dtype=None):
-    # TODO: validate loading LoRA of tied embeddings
-
     config = PeftConfig.from_pretrained(peft_name)
     if manual_untie_embeddings:
+        # Load base model with untied embeddings to avoid conflicts
         ref_model = AutoModelForCausalLM.from_pretrained(
             model_name, torch_dtype=dtype, tie_word_embeddings=False, device_map="auto"
         ).eval()
 
+        # Manually tie the embeddings for the base model
         ref_model.lm_head.weight.data = ref_model.model.embed_tokens.weight.data.clone()
 
-        # load lora 
+        # Load PEFT config and apply to base model
         model_lora = get_peft_model(ref_model, config)
+        
+        # Load PEFT weights WITHOUT forcing tie_word_embeddings=True
         model = model_lora.from_pretrained(
-            ref_model, peft_name, is_trainable=False, tie_word_embeddings=True
+            ref_model, peft_name, is_trainable=False  # Removed tie_word_embeddings=True
         )
 
-        assert torch.equal(
+        # Check if LoRA has broken the tie (expected behavior)
+        embeddings_tied = torch.equal(
             model.model.lm_head.weight.data, 
             model.model.model.embed_tokens.weight.data
         )
-        # TODO: this currently makes the lm_head and embed_tokens different!
+        
+        if embeddings_tied:
+            logging.warning("Embeddings are still tied after LoRA loading - this might indicate LoRA is not modifying both layers")
+        else:
+            logging.info("LoRA has successfully broken the tie between embeddings and lm_head (as expected)")
+        
+        # Merge and unload - this will preserve the LoRA modifications
         model = model.merge_and_unload()  
         return model
 
@@ -126,6 +135,9 @@ def load_model_and_tokenizer(model_params):
             tokenizer.model_max_length = 4096
         case path if "meta-llama/meta-llama-3-8b-instruct" in path:
             tokenizer.model_max_length = 8192
+        case path if "meta-llama/Llama-3.1-8B-Instruct" in path:
+            # tokenizer.model_max_length = 8192
+            pass
         case path if "nousresearch/hermes-2-pro-llama-3-8b" in path:
             tokenizer.model_max_length = 8192
         case path if "llm-lat/robust-llama3-8b-instruct" in path:

@@ -2,7 +2,7 @@ defaults:
   - submitit_slurm
 
 _target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
-account: def-bengioy
+account: rrg-bengioy-ad
 timeout_min: 10 
 tasks_per_node: 1
 nodes: 1
