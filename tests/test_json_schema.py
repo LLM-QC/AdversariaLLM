@@ -197,9 +197,7 @@ def test_mixed_batch(model_id):
     schema = SCHEMAS["nested"]
 
     prompts = [
-        "JSON please.",
-        "JSON please, but make it fancy.",
-        "Just JSON.",
+        f"Generate a JSON object according to this schema: {schema}",
     ]
     batch = [torch.tensor(tok.encode(p, add_special_tokens=False)) for p in prompts]
 
@@ -225,3 +223,44 @@ def test_mixed_batch(model_id):
     for i, out in enumerate(outs):
         frag = _parse_json(out) or "<NO JSON>"
         print(f"row {i}: {frag}")
+
+
+# Test string limit
+
+@pytest.mark.parametrize("model_id", MODEL_IDS)
+def test_string_max_length_limit(model_id):
+    # Question whose natural answer exceeds 10 characters,
+    # but schema restricts the field to maxLength=10
+    model, tok = _get_model_tok(model_id)
+    short_schema = {
+        "type": "object",
+        "properties": {
+            "answer1": {"type": "string", "maxLength": 10},
+            "answer2": {"type": "string", "maxLength": 10},
+        },
+        "required": ["answer1", "answer2"],
+        "additionalProperties": False,
+    }
+    # prompt asking for a verbose explanation
+    frag, out = _generate(
+        model,
+        tok,
+        short_schema,
+        padding_side="right",
+        use_cache=True,
+        # prompt_suffix="Explain photosynthesis in detail. Answer with a json object containing a single string field 'answer'.",
+        prompt_suffix="Explain photosynthesis in detail. Answer with two options in a json object with fields 'answer1' and 'answer2'.",
+    )
+
+    assert "answer1" in frag
+    assert isinstance(frag["answer1"], str)
+    assert len(frag["answer1"]) <= 10, (
+        f"Expected <=10 chars, got {len(frag['answer1'])}: {frag['answer1']!r}"
+    )
+
+    assert "answer2" in frag
+    assert isinstance(frag["answer2"], str)
+    assert len(frag["answer2"]) <= 10, (
+        f"Expected <=10 chars, got {len(frag['answer2'])}: {frag['answer2']!r}"
+    )
+

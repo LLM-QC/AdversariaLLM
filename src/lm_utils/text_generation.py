@@ -232,17 +232,21 @@ class APITextGenerator(TextGenerator):
         if len(convs) == 0:
             return GenerationResult(gen=[[]])
 
-        common_generate_args = CommonGenerateArgs(
-            num_return_sequences=num_return_sequences,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            json_schema=json_schema,
-        )
+        function_args = {
+            "num_return_sequences": num_return_sequences,
+            "max_new_tokens": max_new_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "json_schema": json_schema,
+        }
+
+        combined_args = {k: (func_val if func_val is not None else self.default_generate_kwargs.get(k, None)) for k, func_val in function_args.items()}
+
+        common_generate_args = CommonGenerateArgs(**combined_args)
 
         common_generate_args_dict = common_generate_args.to_api_args()
 
-        params = {**self.default_generate_kwargs, **common_generate_args_dict, **kwargs}
+        params = {**common_generate_args_dict, **kwargs}
         res = []
         for conv in convs:
             res.append(self._api_call(conv, **params))

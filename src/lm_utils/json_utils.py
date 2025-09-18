@@ -31,6 +31,7 @@ class JSONFilter:
       1. enforces JSON schema with lm-format-enforcer
       2. suppresses leading whitespace
       3. limits runs of whitespace-only tokens to `max_ws_run`
+      4. optionally filters tokens to only allow safe characters (when white_list_chars=True)
 
     How to create schemata:
     # =============================================================================
@@ -67,7 +68,7 @@ class JSONFilter:
     # |   "enum": ["red","green","blue"]  # fixed vocab                          |
     # | }                                                                        |
     # └────────────────────────────────────────────────────────────────────────────┘
-    # ┌───────────────────────────────  NUMBERS  ───────────────────────────────┐
+    # ┌───────────────────────────────  NUMBERS  ───────────────────────────────┐  # IMPORTANT: minimum and maximum are unfortunately not enforced by lmformatenforcer!
     # | { "type": "number", "minimum": 0, "maximum": 1 }                        |
     # | Use "integer" instead of "number" when you need whole numbers.          |
     # └──────────────────────────────────────────────────────────────────────────┘
@@ -95,7 +96,7 @@ class JSONFilter:
     #             "items": { "type":"string" },
     #             "minItems":1
     #         },
-    #         "age":    { "type":"integer", "minimum":0 }
+    #         "age":    { "type":"integer", "minimum":0 } # minimum is not enforced!
     #       },
     #       "required": ["name","skills","age"]
     #     }
@@ -109,16 +110,30 @@ class JSONFilter:
         schema: dict,
         tokenizer: PreTrainedTokenizerBase,
         batch_size: int,
-        max_ws_run: int = 2,
+        max_ws_run: int = 2, # was 2
+        white_list_chars: bool = True,
     ):
-        from lmformatenforcer import JsonSchemaParser
+
+        # ── patch the decode fn just-in-time ─────────────────────────
+        import lmformatenforcer.integrations.transformers as _tr
+
+        def _decode_override(tokenizer, tokens):
+            # preserve every raw space/punct exactly
+            # this prevents trailing spaces from being stripped causing parsing errors in the package
+            # issue was reported here: https://github.com/noamgat/lm-format-enforcer/issues/166
+            decoded = tokenizer.decode(tokens, clean_up_tokenization_spaces=False)
+            return decoded # originally: decoded.rstrip("�"), but this causes the same issue when this character is actually generated
+
+        _tr._decode_function = _decode_override
+
+        from lmformatenforcer import JsonSchemaParser, CharacterLevelParserConfig
         from lmformatenforcer.integrations.transformers import \
             build_token_enforcer_tokenizer_data
         from lmformatenforcer.tokenenforcer import TokenEnforcer
-
+        parser_config = CharacterLevelParserConfig(max_consecutive_whitespaces=max_ws_run)
         tok_data = build_token_enforcer_tokenizer_data(tokenizer)
         self.enforcers: list[TokenEnforcer] = [
-            TokenEnforcer(tok_data, JsonSchemaParser(schema)) for _ in range(batch_size)
+            TokenEnforcer(tok_data, JsonSchemaParser(schema, parser_config)) for _ in range(batch_size)
         ]
         self.token_histories = [[] for _ in range(batch_size)]
 
@@ -127,6 +142,52 @@ class JSONFilter:
         self.seen_real = [False] * batch_size  # any non-WS token emitted yet?
         self.streak = [0] * batch_size  # current run length of WS tokens
         self.max_ws_run = max_ws_run
+
+        # ── character whitelist handling ─────────────────────────────────
+        self.white_list_chars = white_list_chars
+        if white_list_chars:
+            # Define a comprehensive but safe character whitelist for JSON
+            # Includes: letters, digits, punctuation, common symbols, whitespace
+            self.allowed_chars = set(
+                # Basic ASCII letters and digits
+                'abcdefghijklmnopqrstuvwxyz'
+                'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                '0123456789'
+                # JSON structural characters
+                '{}[]":,\''
+                # Common punctuation and symbols
+                '!@#$%^&*()_+-=<>?/\\|`~;.'
+                '–—…•'
+                # Whitespace characters
+                ' \t\n\r\f\v'
+                # Accented and international characters (common ones)
+                'àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ'
+                'ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞŸ'
+                # Common mathematical and currency symbols
+                '±×÷°£€¥¢¤§¶©®™'
+            )
+
+            # Build set of token IDs that contain only allowed characters
+            self.allowed_token_ids: set[int] = set()
+            # Define problematic quote characters that can break JSON parsing
+            problematic_quotes = ["“", "”", "‘", "’"]  # curly quotes
+
+            # Get special token IDs that should always be allowed
+            special_token_ids = self._get_special_token_ids(tokenizer)
+
+            for tid in range(tokenizer.vocab_size):
+                # Always allow special tokens (EOS, BOS, UNK, etc.)
+                if tid in special_token_ids:
+                    self.allowed_token_ids.add(tid)
+                    continue
+
+                token_text = tokenizer.decode([tid])
+                # Check if all characters in the token are in our whitelist
+                if all(c in self.allowed_chars for c in token_text):
+                    # Additional filter: exclude tokens containing problematic quote chars
+                    if not any(quote in token_text for quote in problematic_quotes) and \
+                        token_text.count('"') < 2: # avoid having two quotes in a, as this might be problematic for the JSON parser
+                        self.allowed_token_ids.add(tid)
 
         # misc
         self.PAD = tokenizer.pad_token_id
@@ -176,6 +237,10 @@ class JSONFilter:
                     continue
                 cand.append(tid)
 
+            # ── apply character whitelist filtering ─────────────────────
+            if self.white_list_chars:
+                cand = [tid for tid in cand if tid in self.allowed_token_ids]
+
             # never leave the model with no options
             if not cand:
                 cand = allowed
@@ -183,6 +248,51 @@ class JSONFilter:
             masked[i, cand] = logits[i, cand]
 
         return masked
+
+    # ------------------------------------------------------------------ #
+    def _get_special_token_ids(self, tokenizer: PreTrainedTokenizerBase) -> set[int]:
+        """
+        Get set of special token IDs that should always be allowed regardless of character content.
+        This includes EOS, BOS, UNK, PAD and other important control tokens.
+
+        Important: EOS tokens are especially critical as they allow the model to properly
+        terminate generation when the JSON is complete, even if the lm-format-enforcer
+        hasn't explicitly marked them as allowed.
+        """
+        special_ids = set()
+
+        # Common special tokens that most tokenizers have
+        special_token_attrs = [
+            'eos_token_id', 'bos_token_id', 'unk_token_id', 'pad_token_id',
+            'cls_token_id', 'sep_token_id', 'mask_token_id'
+        ]
+
+        for attr in special_token_attrs:
+            token_id = getattr(tokenizer, attr, None)
+            if token_id is not None:
+                special_ids.add(token_id)
+
+        # Some tokenizers have additional special tokens in special_tokens_map
+        if hasattr(tokenizer, 'special_tokens_map'):
+            for token_name, token_value in tokenizer.special_tokens_map.items():
+                if isinstance(token_value, str):
+                    # Convert token string to ID
+                    try:
+                        token_ids = tokenizer.encode(token_value, add_special_tokens=False)
+                        if len(token_ids) == 1:  # Only single-token special tokens
+                            special_ids.add(token_ids[0])
+                    except Exception:
+                        pass  # Skip if encoding fails
+
+        # Some tokenizers have all_special_ids attribute
+        if hasattr(tokenizer, 'all_special_ids'):
+            special_ids.update(tokenizer.all_special_ids)
+
+        # Some tokenizers store special tokens in added_tokens_encoder
+        if hasattr(tokenizer, 'added_tokens_encoder'):
+            special_ids.update(tokenizer.added_tokens_encoder.values())
+
+        return special_ids
 
 
 def validate_json_strings(json_likes: list[str], schema: JsonSchema) -> None:
@@ -269,8 +379,9 @@ def _validate_json(schema: Mapping[str, Any], value: Any) -> None:
         elif node_type == "integer":
             if type(val) is not int:  # bools fail
                 raise SchemaValidationError(f"{path}: expected integer")
-            if "maximum" in sch and val > sch["maximum"]:
-                raise SchemaValidationError(f"{path}: {val} > maximum {sch['maximum']}")
+            # if "maximum" in sch and val > sch["maximum"]:
+            #     raise SchemaValidationError(f"{path}: {val} > maximum {sch['maximum']}")
+            # the enforcer can not enforce max and min
 
         # ── anything else = treated as 'no constraints' ────────────────
 
