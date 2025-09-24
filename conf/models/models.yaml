@@ -61,6 +61,10 @@ redflag-tokens/llama3-1-8b-rf-multi:
   <<: *base_llama3_1_8b_rf
   id: redflag-tokens/llama3.1-8B-RF-7683325-multi
 
+redflag-tokens/llama3-2-rf-AT-single-morekl-rampup:
+  <<: *base_llama3_2_rf
+  id: /home/ddobre/scratch/misc_models/AT_single_more-kl_rampup
+
 redflag-tokens/llama3-2-rf-filter5-v3:
   <<: *base_llama3_2_rf
   id: redflag-tokens/llama3.2-RF-filter5-7481078-chkpt-1000

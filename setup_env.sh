@@ -35,7 +35,7 @@ fi
 
 echo "Creating virtual environment in: $ENVDIR"
 
-module load python/3.10 arrow
+module load python/3.11 arrow
 virtualenv --no-download "$ENVDIR"
 source "$ENVDIR/bin/activate"
 
