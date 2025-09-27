@@ -114,6 +114,10 @@ class Attack(Generic[AttRes]):
                 from .bon import BonAttack
 
                 return BonAttack
+            case "crescendo":
+                from .crescendo import CrescendoAttack
+
+                return CrescendoAttack
             case "direct":
                 from .direct import DirectAttack
 
