@@ -51,7 +51,7 @@ def collect_run_paths(suffixes: list[str]|str, classifier: str, filter_by: dict|
     # remove duplicates
     paths = list(set(paths))
     if filter_by:
-        filtered_paths = set(get_filtered_and_grouped_paths(OmegaConf.to_container(filter_by, resolve=True), None)[("all",)])
+        filtered_paths = set(get_filtered_and_grouped_paths(OmegaConf.to_container(filter_by, resolve=True))[("all",)])
         paths = [p for p in paths if p in filtered_paths]
     return sorted(paths, reverse=True)
 

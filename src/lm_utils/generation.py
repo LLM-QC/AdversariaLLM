@@ -273,9 +273,10 @@ def generate_ragged(
                     )
                     # we need to iterate like this because key_cache and value_cache
                     # dont have a setter method
-                    for i in range(len(past_key_values.key_cache)):
-                        past_key_values.key_cache[i] = past_key_values.key_cache[i].to(model.device)
-                        past_key_values.value_cache[i] = past_key_values.value_cache[i].to(model.device)
+                    for layer in past_key_values.layers:
+                        layer.keys = layer.keys.to(model.device)
+                        layer.values = layer.values.to(model.device)
+
                 if next_token_idx.min() > 1:
                     model(
                         inputs_embeds=padded_embeddings[:, : next_token_idx.min() - 1],
@@ -336,9 +337,9 @@ def generate_ragged(
                                 logging.info(f"Early exit after {i}/{max_new_tokens} tokens.")
                             break
 
-                        for j in range(len(past_key_values.key_cache)):
-                            past_key_values.key_cache[j] = past_key_values.key_cache[j][still_active].clone()
-                            past_key_values.value_cache[j] = past_key_values.value_cache[j][still_active].clone()
+                        for layer in past_key_values.layers:
+                            layer.keys = layer.keys[still_active].clone()
+                            layer.values = layer.values[still_active].clone()
 
                     next_token_idx[next_token_idx == cur_idx] += 1
                     lengths[generating] += 1

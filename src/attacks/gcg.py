@@ -196,7 +196,7 @@ def compute_loss(shift_logits: Tensor, shift_labels: Tensor, loss_type: str, mel
         loss = torch.nn.functional.kl_div(log_probs, tgt_dist.expand(B, T, -1), reduction="none").sum(dim=-1) # (B, T, D) -> (B, T)
         loss = loss[:, 0] # (B, T) -> (B,)
     elif loss_type == "kl_allowed_fwd":
-        log_probs = torch.nn.functional.log_softmax(shift_logits.float(), dim=-1)[:, 0]
+        log_probs = torch.nn.functional.log_softmax(shift_logits.float(), dim=-1)[:, 0]  # (B, T, D) -> (B, D)
         B, V = log_probs.shape
         N_valid = V - len(disallowed_ids)
         tgt_dist = torch.full((1, V), device=log_probs.device, fill_value=1 / N_valid)

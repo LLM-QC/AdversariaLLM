@@ -339,7 +339,6 @@ class GCGReinforceAttack(Attack[GCGReinforceConfig]):
             flops_for_step = flops_loss.sum().long().item()
             # Update the buffer based on the loss
 
-
         return rewards, current_loss, time.time() - t0a, optim_ids, flops_for_step
 
     @torch.no_grad()
@@ -715,6 +714,8 @@ class GCGReinforceAttack(Attack[GCGReinforceConfig]):
 
         for i, gen in enumerate(generations):
             gen_len = len(gen)
+            if gen_len == 0:
+                continue
             start_idx = i * N
             end_idx = start_idx + N
             weights = token_weights[:gen_len].clone()
@@ -730,8 +731,6 @@ class GCGReinforceAttack(Attack[GCGReinforceConfig]):
         return reinforce_losses, torch.tensor(flops_loss).expand_as(reinforce_losses) / N
 
     def _print_info(self, generations, advantages, rewards, categories, reinforce_losses=None):
-        if reinforce_losses is None:
-            reinforce_losses = torch.full_like(advantages, fill_value=float("nan"))
         # Define color codes for each category
         colors = {
             "samples": "\033[94m",      # Blue
@@ -741,22 +740,28 @@ class GCGReinforceAttack(Attack[GCGReinforceConfig]):
         }
         reset_color = "\033[0m"
 
-        # Print formatted header
-        print(f"{'Generation':<100} {'Category':<12} {'Advantage':<12} {'Raw Reward':<12} {'Loss':<12}")
-        print("-" * 148)
+        # Print formatted header based on whether we have losses
+        if reinforce_losses is not None:
+            print(f"{'Generation':<100} {'Category':<12} {'Advantage':<12} {'Raw Reward':<12} {'Loss':<12}")
+            print("-" * 148)
+        else:
+            print(f"{'Generation':<100} {'Category':<12} {'Advantage':<12} {'Raw Reward':<12}")
+            print("-" * 136)
 
-        for i, (gen, adv, reward, loss) in enumerate(zip(generations, advantages, rewards, reinforce_losses)):
+        for i, (gen, adv, reward, category) in enumerate(zip(generations, advantages, rewards, categories)):
             generation_text = self.tokenizer.decode(gen)[:100].replace('\n', '\\n')
-            category = categories[i]
             color = colors.get(category, "")
 
             # Format values
             advantage_val = f"{adv.item():.6f}"
             reward_val = f"{reward.item():.6f}"
-            loss_val = f"{loss.item():.6f}"
 
-            # Print with color
-            print(f"{color}{generation_text:<100} {category:<12} {advantage_val:<12} {reward_val:<12} {loss_val:<12}{reset_color}")
+            # Print with or without loss column
+            if reinforce_losses is not None:
+                loss_val = f"{reinforce_losses[i].item():.6f}"
+                print(f"{color}{generation_text:<100} {category:<12} {advantage_val:<12} {reward_val:<12} {loss_val:<12}{reset_color}")
+            else:
+                print(f"{color}{generation_text:<100} {category:<12} {advantage_val:<12} {reward_val:<12}{reset_color}")
 
     @torch.no_grad()
     def compute_candidates_loss(self, generations: list[Tensor], advantages: Tensor, categories: list[str], candidate_ids: Tensor):

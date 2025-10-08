@@ -7,6 +7,8 @@ database operations for attack result management and analysis.
 
 import os
 import glob
+from functools import lru_cache
+from typing import Iterable
 
 from omegaconf import OmegaConf
 from pymongo import MongoClient
@@ -140,24 +142,33 @@ def check_match(doc_fragment, filter_fragment):
     return doc_fragment == filter_fragment
 
 
-def get_filtered_and_grouped_paths(filter_by, group_by) -> dict[tuple[str], list[str]]:
+@lru_cache
+def get_all_runs() -> list[dict]:
+    """
+    Retrieves all runs from the database.
+    """
+    db = get_mongodb_connection()
+    collection = db.runs
+    return list(collection.find())
+
+
+def get_filtered_and_grouped_paths(filter_by: dict, group_by: Iterable[str]|None = None, force_reload: bool = True) -> dict[tuple[str], list[str]]:
     """
     Retrieves log paths from MongoDB filtered by criteria and grouped according to group_by.
 
     Args:
         filter_by (dict): Filtering criteria. Can contain nested dictionaries.
         group_by (list or tuple): List/tuple of keys to group by from the 'config' field.
+        force_reload (bool), default True: If True, reload the cached runs. Setting to False is useful for speeding up repeated calls without adding new runs.
 
     Returns:
         dict: A dictionary where keys are group identifiers (tuples of strings)
               and values are lists of log paths.
     """
     # Connect to MongoDB
-    db = get_mongodb_connection()
-    collection = db.runs
-
-    # Use MongoDB's find() method to get all documents
-    all_results = list(collection.find())
+    if force_reload:
+        get_all_runs.cache_clear()
+    all_results = get_all_runs()
 
     # Filter in Python using the check_match helper for complex nested conditions
     if filter_by:

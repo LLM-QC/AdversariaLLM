@@ -13,17 +13,15 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
-import copy
 
 import torch
 import transformers
+from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from .attack import (Attack, AttackResult, AttackStepResult,
-                     GenerationConfig, SingleAttackRunResult)
-from ..lm_utils import (generate_ragged_batched, get_losses_batched,
-                        prepare_conversation)
+from ..lm_utils import generate_ragged_batched, get_losses_batched, prepare_conversation
 from ..types import Conversation
+from .attack import Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult
 
 
 @dataclass
@@ -163,7 +161,7 @@ class BonAttack(Attack):
         prompt_token_tensors_list: list[torch.Tensor] = []
         target_token_tensors_list: list[torch.Tensor] = []
 
-        for conversation in dataset:
+        for conversation in tqdm(dataset, desc="Preparing inputs"):
             # Assuming conversation = [{'role': 'user', ...}, {'role': 'assistant', ...}]
             assert len(conversation) == 2, "Best-of-N attack currently assumes single-turn conversation."
             original_conversations.append(conversation)

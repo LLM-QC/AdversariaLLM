@@ -24,7 +24,7 @@ disable_progress_bar()  # disable progress bar for model loading
 
 
 def load_model_and_tokenizer(
-    model_params: DictConfig,
+    model_params: DictConfig | dict,
 ) -> tuple[PreTrainedModel, PreTrainedTokenizerBase]:
     """Load a model and tokenizer from a model parameters configuration.
 
@@ -38,11 +38,14 @@ def load_model_and_tokenizer(
     - etc.
 
     Args:
-        model_params: A configuration object containing model parameters.
+        model_params: A configuration object or dictionary containing model parameters.
 
     Returns:
         A tuple containing the loaded model and tokenizer.
     """
+    if not isinstance(model_params, DictConfig):
+        model_params = DictConfig(model_params)
+
     gc.collect()
     torch.cuda.empty_cache()
     if model_params.dtype is None:
@@ -140,6 +143,8 @@ def load_model_and_tokenizer(
             )
         case path if "zephyr" in path:
             tokenizer.model_max_length = 32768
+        case path if "openai/gpt-oss" in path:
+            tokenizer.model_max_length = 128000
     if tokenizer.model_max_length > 262144:
         raise ValueError(
             f"Model max length {tokenizer.model_max_length} is probably too large."

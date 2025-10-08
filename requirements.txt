@@ -17,4 +17,4 @@ seaborn
 submitit
 torch >=2.3.0
 tqdm >=4.66.5
-transformers >=4.40.0
+transformers>=4.55.0

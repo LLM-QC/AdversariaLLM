@@ -75,6 +75,10 @@ class PairConfig:
 class PAIRAttack(Attack):
     def __init__(self, config):
         super().__init__(config)
+        if self.config.num_steps < 30:
+            logging.warning(f"The PAIR paper used num_steps=30, but you have set it to {self.config.num_steps}.")
+        if self.config.num_streams < 3:
+            logging.warning(f"The PAIR paper used num_streams=3, but you have set it to {self.config.num_streams}.")
 
     def run(
         self,

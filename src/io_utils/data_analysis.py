@@ -74,7 +74,7 @@ def _gather(value, prefix: tuple[str], out):
                 _gather(v, prefix, out)               # sub-lists of dicts
 
 
-def collect_results(paths, infer_sampling_flops=False) -> dict[tuple[str], dict[str, list[float]]]:
+def collect_results(paths, infer_sampling_flops=False) -> dict[tuple[str], dict[str|tuple[str], list[float]]]:
     """
     Loads JSONs corresponding to a list of paths from disk.
 
