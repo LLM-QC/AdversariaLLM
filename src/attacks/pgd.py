@@ -342,10 +342,11 @@ class PGDAttack(Attack):
         else:
             return embeddings_or_one_hot
 
-    def _calculate_loss(self, logits, targets, mask, tokenizer=None):
+    def _calculate_loss(self, logits, targets, mask, tokenizer: Optional[PreTrainedTokenizerBase] = None):
         if self.config.loss == "ce":
             return self._calculate_ce_loss(logits, targets, mask)
         elif self.config.loss == "entropy_allowed":
+            assert tokenizer is not None, "tokenizer is required for entropy_allowed loss"
             return self._calculate_entropy_allowed_loss(logits, mask, tokenizer=tokenizer)
         elif self.config.loss == "entropy_first_token":
             return self._calculate_entropy_first_token_loss(logits, mask)
@@ -409,10 +410,7 @@ class PGDAttack(Attack):
 
         return loss
 
-    def _calculate_entropy_first_token_loss(self,
-                                logits: torch.Tensor,
-                                mask:   torch.Tensor,
-                                adaptive_threshold: float = 0.7) -> torch.Tensor:
+    def _calculate_entropy_first_token_loss(self, logits: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """
         * maximise entropy of the **first** token (→ encourage diverse samples)
 

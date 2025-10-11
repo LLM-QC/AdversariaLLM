@@ -34,13 +34,13 @@ import sys
 import time
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Literal
+from typing import Literal, Optional, cast
 
 import torch
 import transformers
 from torch import Tensor
 from tqdm import trange
-from transformers import DynamicCache, PreTrainedModel, PreTrainedTokenizer
+from transformers import DynamicCache, PreTrainedModel, PreTrainedTokenizerBase
 
 from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
                      SingleAttackRunResult)
@@ -79,7 +79,7 @@ class GCGConfig:
     grad_momentum: float = 0.0  # momentum over steps
 
 
-def compute_loss(shift_logits: Tensor, shift_labels: Tensor, loss_type: str, mellowmax_alpha: float = 1.0, disallowed_ids: Tensor = None, tokenizer: PreTrainedTokenizer = None) -> Tensor:
+def compute_loss(shift_logits: Tensor, shift_labels: Tensor, loss_type: str, disallowed_ids: Tensor, mellowmax_alpha: float = 1.0, tokenizer: Optional[PreTrainedTokenizerBase] = None) -> Tensor:
     """Computes the loss based on the specified loss type.
 
     Args:
@@ -210,7 +210,14 @@ def compute_loss(shift_logits: Tensor, shift_labels: Tensor, loss_type: str, mel
         )                                 # (B, D)
         loss = loss.sum(dim=-1)  # (B, D) -> (B,)
     elif loss_type == "kl_allowed_fwd_ascii_only":
-        allowed_toks = string.ascii_letters + string.whitespace + string.digits + string.punctuation + tokenizer.convert_ids_to_tokens(tokenizer.encode("a b")[-1:])[0][0]
+        assert tokenizer is not None, "tokenizer is required for kl_allowed_fwd_ascii_only loss"
+        allowed_toks = (
+            string.ascii_letters
+            + string.whitespace
+            + string.digits
+            + string.punctuation
+            + tokenizer.convert_ids_to_tokens(tokenizer.encode("a b")[-1:])[0][0]
+        )
         new_disallowed_ids = []
         for i in range(len(tokenizer)):
             if i in disallowed_ids:
@@ -252,13 +259,16 @@ class GCGAttack(Attack):
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
 
-    def run(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, dataset: PromptDataset) -> AttackResult:
+    def run(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, dataset: PromptDataset) -> AttackResult:
         self.tokenizer = tokenizer  # Store tokenizer as instance variable
         self.not_allowed_ids = get_disallowed_ids(tokenizer, self.config.allow_non_ascii, self.config.allow_special).to(model.device)
         # need to have this filter here for models like gemma-3 which add extra tokens that do not have embeddings
         # we cannot filter the ids inside the get_disallowed_ids function because we need
         # the embedding layer weights to see the correct sizes
-        self.not_allowed_ids = self.not_allowed_ids[self.not_allowed_ids < model.get_input_embeddings().weight.size(0)]
+        embeddings = model.get_input_embeddings().weight
+        assert isinstance(embeddings, torch.Tensor), "embeddings are expected to be a tensor"
+        num_embeddings = embeddings.size(0)
+        self.not_allowed_ids = self.not_allowed_ids[self.not_allowed_ids < num_embeddings]
         runs = []
         for conversation in dataset:
             runs.append(self._attack_single_conversation(model, tokenizer, conversation))
@@ -315,13 +325,16 @@ class GCGAttack(Attack):
         # Initialize the attack buffer
         buffer, flops_init = self.init_buffer(model, attack_ids)
         optim_ids = buffer.get_best_ids()
+        assert self.tokenizer is not None, "Shouldn't happen but at least type hints are happy"
         token_selection = SubstitutionSelectionStrategy(
             self.config,
             self.prefix_cache,
             self.pre_prompt_embeds,
             self.post_embeds,
             self.target_embeds,
-            self.target_ids, self.not_allowed_ids, self.tokenizer
+            self.target_ids,
+            self.not_allowed_ids,
+            self.tokenizer
         )
         losses = []
         times = []
@@ -432,7 +445,6 @@ class GCGAttack(Attack):
                 )
                 sampled_ids = sampled_ids[idx]
                 sampled_ids_pos = sampled_ids_pos[idx]
-            t_filter_end = time.time()
 
             # Compute loss on candidates
             compute_loss_fn = partial(self.compute_candidates_loss, model)
@@ -440,7 +452,6 @@ class GCGAttack(Attack):
 
             torch.cuda.synchronize()  # Ensure GPU computation is complete
             flops_loss = flops_loss.sum().item()
-            t_loss_end = time.time()
 
             # Select best candidate and update buffer
             current_loss = loss.min().item()
@@ -480,7 +491,7 @@ class GCGAttack(Attack):
         self,
         model: transformers.PreTrainedModel,
         attack_ids: Tensor,
-    ) -> Tensor:
+    ) -> tuple[Tensor, torch.BoolTensor, int]:
         """Computes the GCG loss on all candidate token id sequences.
 
         Args:
@@ -492,6 +503,10 @@ class GCGAttack(Attack):
         Returns:
             loss : Tensor, shape = (B,)
                 the GCG loss on all candidate sequences
+            acc : Tensor, shape = (B,)
+                the accuracy on all candidate sequences
+            flops : int
+                Number of floating-point operations performed
         """
         B = attack_ids.shape[0]
         T = self.pre_prompt_embeds.size(1)
@@ -536,9 +551,9 @@ class GCGAttack(Attack):
         shift_logits = logits[..., tmp - 1 : -1, :].contiguous()
         shift_labels = self.target_ids[:, :self.target_length].repeat(B, 1)
 
-        loss = compute_loss(shift_logits, shift_labels, self.config.loss, self.config.mellowmax_alpha, self.not_allowed_ids, self.tokenizer)  # (B,)
+        loss = compute_loss(shift_logits, shift_labels, self.config.loss, self.not_allowed_ids, self.config.mellowmax_alpha, self.tokenizer)  # (B,)
 
-        acc = (shift_logits.argmax(-1) == shift_labels).all(-1)  # (B, T) -> (B,)
+        acc: torch.BoolTensor = (shift_logits.argmax(-1) == shift_labels).all(-1)  # (B, T) -> (B,)
 
         if self.config.early_stop:
             if acc.any().item():
@@ -579,7 +594,7 @@ class AttackBuffer:
 
 
 class SubstitutionSelectionStrategy:
-    def __init__(self, config: GCGConfig, prefix_cache: list[tuple[Tensor, Tensor]], pre_prompt_embeds: Tensor, post_embeds: Tensor, target_embeds: Tensor, target_ids: Tensor, not_allowed_ids: Tensor, tokenizer: PreTrainedTokenizer):
+    def __init__(self, config: GCGConfig, prefix_cache: list[tuple[Tensor, Tensor]], pre_prompt_embeds: Tensor, post_embeds: Tensor, target_embeds: Tensor, target_ids: Tensor, not_allowed_ids: Tensor, tokenizer: PreTrainedTokenizerBase):
         self.config = config
         self.strategy = config.token_selection
         self.prefix_cache = prefix_cache
@@ -689,7 +704,8 @@ class SubstitutionSelectionStrategy:
                 random_indices = torch.tensor([random.choice(allowed_ids) for _ in range(current_batch_size)],
                                              device=ids.device).unsqueeze(1)
                 grad_ids_batch.scatter_(1, random_positions, random_indices)
-                batch_grads, flops_grad = self.compute_token_gradient(grad_ids_batch, model).detach()
+                batch_grads, flops_grad = self.compute_token_gradient(grad_ids_batch, model)
+                batch_grads = batch_grads.detach()
                 flops += flops_grad
                 all_grads += batch_grads.sum(0)
             grad = all_grads / n_smoothing
@@ -857,7 +873,8 @@ class SubstitutionSelectionStrategy:
             sampled_ids : Tensor, shape = (search_width, n_optim_ids)
                 sampled token ids
         """
-        grad, flops_grad = self.compute_token_gradient(ids.unsqueeze(0), model).squeeze(0)  # (n_optim_ids, vocab_size)
+        grad, flops_grad = self.compute_token_gradient(ids.unsqueeze(0), model)
+        grad = grad.squeeze(0)  # (n_optim_ids, vocab_size)
         n_optim_ids = len(ids)
         original_ids = ids.repeat(search_width, 1)
 
@@ -872,7 +889,7 @@ class SubstitutionSelectionStrategy:
             .topk(topk * n_optim_ids, largest=False, sorted=False)
             .indices
         )  # (n_optim_ids, topk)
-        topk_ids = torch.randperm(grad.view(-1), device=topk_ids.device)[
+        topk_ids = torch.randperm(grad.view(-1).shape[0], device=topk_ids.device)[
             : topk * n_optim_ids
         ]  # (n_optim_ids, topk)
 
@@ -894,7 +911,7 @@ class SubstitutionSelectionStrategy:
         self,
         optim_ids: Tensor,
         model: transformers.PreTrainedModel,
-    ) -> Tensor:
+    ) -> tuple[Tensor, int]:
         """Computes the gradient of the GCG loss w.r.t the one-hot token matrix.
 
         Args:
@@ -906,24 +923,27 @@ class SubstitutionSelectionStrategy:
         Returns:
             grad : Tensor, shape = (N, n_optim_ids, vocab_size)
                 the gradient of the GCG loss computed with respect to the one-hot token embeddings
+            flops : int
+                Number of floating-point operations performed
         """
         assert optim_ids.ndim == 2
         embedding_layer = model.get_input_embeddings()
 
         # Create the one-hot encoding matrix of our optimized token ids
         optim_ids_onehot = torch.nn.functional.one_hot(
-            optim_ids, num_classes=embedding_layer.num_embeddings
+            optim_ids, num_classes=embedding_layer.num_embeddings  # type: ignore
         )
         optim_ids_onehot = optim_ids_onehot.to(dtype=model.dtype, device=model.device)
         optim_ids_onehot.requires_grad_()
 
+        embedding_weight = cast(Tensor, embedding_layer.weight)
         # (1, num_optim_tokens, vocab_size) @ (vocab_size, embed_dim) -> (1, num_optim_tokens, embed_dim)
         if self.config.use_constrained_gradient:
             optim_embeds = (
                 optim_ids_onehot / optim_ids_onehot.sum(dim=-1, keepdim=True)
-            ) @ embedding_layer.weight
+            ) @ embedding_weight
         else:
-            optim_embeds = optim_ids_onehot @ embedding_layer.weight
+            optim_embeds = optim_ids_onehot @ embedding_weight
         if hasattr(embedding_layer, "embed_scale"):  # For gemma
             optim_embeds = optim_embeds * embedding_layer.embed_scale.to(optim_embeds)
 
@@ -965,7 +985,7 @@ class SubstitutionSelectionStrategy:
         shift_logits = logits[..., shift - 1 : -1, :].contiguous()  # (1, num_target_ids, vocab_size)
         shift_labels = self.target_ids.repeat(B, 1)
 
-        loss = compute_loss(shift_logits, shift_labels, self.config.loss, self.config.mellowmax_alpha, self.not_allowed_ids, self.tokenizer)
+        loss = compute_loss(shift_logits, shift_labels, self.config.loss, self.not_allowed_ids, self.config.mellowmax_alpha, self.tokenizer)
         loss = loss.mean()
 
         optim_ids_onehot_grad = torch.autograd.grad(

@@ -75,22 +75,22 @@ def with_max_batchsize(function: Callable, *inputs, initial_batch_size: int | No
                 batch_size * 2 <= input_length):
                 batch_size = batch_size * 2
                 successful_batches = 0  # Reset counter
-                if verbose:
+                if pbar is not None:
                     pbar.set_description(f"Increasing batch size to b={batch_size}")
 
-            if verbose:
+            if pbar is not None:
                 pbar.update(batch_size)
         except torch.cuda.OutOfMemoryError:
             # If we hit OOM, reduce batch size and retry the same chunk
             batch_size = batch_size // 2
             successful_batches = 0  # Reset counter after OOM
-            if verbose:
+            if pbar is not None:
                 pbar.set_description(f"Running function b={batch_size}")
             if batch_size < 1:
                 raise RuntimeError(
                     "OOM even with batch_size=1; cannot generate further."
                 )
-    if verbose:
+    if pbar is not None:
         pbar.close()
 
     if all(isinstance(x, torch.Tensor) for x in outputs):

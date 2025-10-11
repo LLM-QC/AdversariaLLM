@@ -17,7 +17,9 @@ from typing import Optional
 
 import numpy as np
 import torch
+from omegaconf import DictConfig
 from tqdm import trange
+from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
                      SingleAttackRunResult)
@@ -161,16 +163,16 @@ class AutoDANAttack(Attack):
                     {"role": "user", "content": prefix + msg},
                     {"role": "assistant", "content": ""}
                 ])
-            adv_prompt_tokens = [torch.cat(prepare_conversation(tokenizer, conv)[0][:-1]) for conv in attack_conversations]
+            adv_prompt_tokens: list[torch.LongTensor] = [torch.cat(prepare_conversation(tokenizer, conv)[0][:-1]) for conv in attack_conversations]
             batch_completions = generate_ragged_batched(
                 model,
                 tokenizer,
                 token_list=adv_prompt_tokens,
+                use_cache=True,
                 temperature=self.config.generation_config.temperature,
                 top_p=self.config.generation_config.top_p,
                 top_k=self.config.generation_config.top_k,
                 num_return_sequences=self.config.generation_config.num_return_sequences,
-                use_cache=True
             )
             logging.info("Generated completions")
 
@@ -335,12 +337,16 @@ class AutoDANAttack(Attack):
 
 
 class HuggingFace:
-    def __init__(self, model_or_model_path, tokenizer=None, config=None):
+    def __init__(self, model_or_model_path: str | PreTrainedModel, tokenizer: PreTrainedTokenizerBase | None = None, config: DictConfig | dict | None = None):
         if isinstance(model_or_model_path, str):
+            if config is None:
+                raise ValueError("config must be provided if model_or_model_path is a string")
             self.model, self.tokenizer = load_model_and_tokenizer(config)
-        else:
+        elif isinstance(model_or_model_path, PreTrainedModel) and tokenizer is not None:
             self.model = model_or_model_path
             self.tokenizer = tokenizer
+        else:
+            raise ValueError("model_or_model_path must be a string or a PreTrainedModel instance with a tokenizer must be provided")
 
         self.eos_token_ids = [self.tokenizer.eos_token_id]
 
@@ -365,7 +371,7 @@ Please revise the following sentence with no changes to their length and only ou
             [{"role": "user", "content": msg + init_msg}, {"role": "assistant", "content": ""}]
             for msg, init_msg in zip(inputs, init_msgs)
         ]
-        input_tokens = [
+        input_tokens: list[torch.LongTensor] = [
             torch.cat(
                 prepare_conversation(tokenizer, conversation)[0][:-1]
             ) for conversation in conversations
