@@ -8,7 +8,6 @@ adv_behaviors:
   shuffle: true
 alpaca:
   name: alpaca
-  messages_path: ${root_dir}/data/alpaca.json
   seed: 0
   idx: null
   shuffle: true

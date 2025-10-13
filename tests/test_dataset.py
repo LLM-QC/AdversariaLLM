@@ -34,15 +34,14 @@ def test_alpaca_dataset():
 
     config = AlpacaConfig(
         name="alpaca",
-        messages_path="./data/alpaca.json",
         seed=0,
         shuffle=False,
     )
     dataset = AlpacaDataset(config)
 
-    assert len(dataset) == 31323
+    assert len(dataset) == 52002
     for conv in dataset:
-        assert len(conv) == 1, "Alpaca conversation length should be 1"
+        assert len(conv) == 2, "Alpaca conversation length should be 2"
         assert _is_conversation(conv)
 
 
