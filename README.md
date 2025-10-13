@@ -7,8 +7,8 @@ This repository provides a unified framework for running various attack methods,
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/LLM-QC/llm-quick-check
-cd llm-quick-check
+git clone https://github.com/LLM-QC/AdversiaraLLM
+cd AdversariaLLM
 ```
 
 2. Install dependencies:
