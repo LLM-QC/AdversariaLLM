@@ -9,7 +9,7 @@ from .prompt_dataset import PromptDataset
 
 @dataclass
 class JBBBehaviorsConfig:
-    name: str
+    name: str = "jbb_behaviors"
     seed: int = 0
     idx: list[int] | int | str | None = None
     shuffle: bool = True

@@ -31,6 +31,7 @@ refusal_direction_data:
   name: refusal_direction_data
   path: ${root_dir}/data/refusal_direction/
   split: train
+  type: harmful
   seed: 0
   idx: null
   shuffle: true

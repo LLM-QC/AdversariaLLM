@@ -8,8 +8,8 @@ from .prompt_dataset import PromptDataset
 
 @dataclass
 class AlpacaConfig:
-    name: str
-    messages_path: str
+    name: str = "alpaca"
+    messages_path: str = "./data/alpaca.json"
     seed: int = 0
     idx: list[int] | int | str | None = None
     shuffle: bool = True

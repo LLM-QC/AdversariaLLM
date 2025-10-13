@@ -9,7 +9,7 @@ from .prompt_dataset import PromptDataset
 
 @dataclass
 class ORBenchConfig:
-    name: str
+    name: str = "or_bench"
     seed: int = 0
     idx: list[int] | int | str | None = None
     shuffle: bool = True
