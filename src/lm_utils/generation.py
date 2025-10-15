@@ -323,7 +323,7 @@ def generate_ragged(
             lengths = [
                 {
                     "padding": embeddings.size(1) - e.size(0),
-                    "generation": max_new_tokens - e.size(0),
+                    "generation": max_new_tokens + e.size(0),
                 }
                 for e in embedding_list
             ]
