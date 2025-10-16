@@ -18,7 +18,9 @@ from pathlib import Path
 import pytest
 import torch
 from omegaconf import OmegaConf
-from src.lm_utils.filters import json_filter
+
+from src.lm_utils import generate_ragged, json_filter, validate_json_strings
+from src.lm_utils.filters import _parse_json, _validate_json_string
 
 # ═════════════════════════════════════════════════════════════════════
 #  Project paths
@@ -107,9 +109,6 @@ def _get_model_tok(model_id: str):
 #  Core generation helper
 # ═════════════════════════════════════════════════════════════════════
 def _generate(model, tok, schema, padding_side, use_cache, prompt_suffix=""):
-    from src.lm_utils import generate_ragged
-    from src.lm_utils.filters import _parse_json, _validate_json_string
-
     prompt = f"Return ONLY JSON that matches this schema:\n{json.dumps(schema)}\n{prompt_suffix}"
     ids = tok.encode(prompt, add_special_tokens=False)
     out = generate_ragged(
@@ -202,8 +201,6 @@ def test_mixed_batch(model_id):
     ]
     batch = [torch.tensor(tok.encode(p, add_special_tokens=False)) for p in prompts]
 
-    from src.lm_utils import generate_ragged, validate_json_strings
-    from src.lm_utils.filters import _parse_json
 
     outs = generate_ragged(
         model=model,
