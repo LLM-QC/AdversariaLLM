@@ -127,7 +127,6 @@ class ActorAttack(Attack[ActorAttackResult]):
         self.early_stop = config.early_stop
         self.dynamic_modify = config.dynamic_modify
 
-        """Setup default filter configurations to avoid repetition."""
         # Free (no JSON) generation filter: Force EOS repetition filter
         self.free_gen_repetition_filters = [repetition_filter(**config.free_gen_repetition_filter)]
 
