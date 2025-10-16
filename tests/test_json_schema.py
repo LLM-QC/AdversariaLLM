@@ -19,6 +19,9 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
+from src.lm_utils import generate_ragged, json_filter, validate_json_strings
+from src.lm_utils.filters import _parse_json, _validate_json_string
+
 # ═════════════════════════════════════════════════════════════════════
 #  Project paths
 # ═════════════════════════════════════════════════════════════════════
@@ -106,9 +109,6 @@ def _get_model_tok(model_id: str):
 #  Core generation helper
 # ═════════════════════════════════════════════════════════════════════
 def _generate(model, tok, schema, padding_side, use_cache, prompt_suffix=""):
-    from src.lm_utils import generate_ragged
-    from src.lm_utils.json_utils import _parse_json, _validate_json_string
-
     prompt = f"Return ONLY JSON that matches this schema:\n{json.dumps(schema)}\n{prompt_suffix}"
     ids = tok.encode(prompt, add_special_tokens=False)
     out = generate_ragged(
@@ -116,19 +116,19 @@ def _generate(model, tok, schema, padding_side, use_cache, prompt_suffix=""):
         tokenizer=tok,
         token_list=[torch.tensor(ids)],
         max_new_tokens=128,
-        temperature=0.1,
+        temperature=0.0,
         padding_side=padding_side,
         use_cache=use_cache,
-        json_schema=schema,
+        filters=[json_filter(schema)],
     )[0][0]
     print(f"\n--- JSON output ---\n{out.strip()}")
-    _validate_json_string(out, schema)
+    _validate_json_string(out, schema, raise_on_error=True)
     frag = _parse_json(out)
     return frag, out
 
 
 def test_parse_json():
-    from src.lm_utils.json_utils import _parse_json
+    from src.lm_utils.filters import _parse_json
 
     assert _parse_json('prefix {"a":1} suffix')['a'] == 1
     assert _parse_json('{"b": 2, "note": "brace } in string"}')['b'] == 2
@@ -149,7 +149,7 @@ def test_parse_json():
     ],
 )
 def test_valid_samples(sample):
-    from src.lm_utils.json_utils import _parse_json, _validate_json
+    from src.lm_utils.filters import _parse_json, _validate_json
 
     SCHEMA = {
         "type": "object",
@@ -201,8 +201,6 @@ def test_mixed_batch(model_id):
     ]
     batch = [torch.tensor(tok.encode(p, add_special_tokens=False)) for p in prompts]
 
-    from src.lm_utils import generate_ragged, validate_json_strings
-    from src.lm_utils.json_utils import _parse_json
 
     outs = generate_ragged(
         model=model,
@@ -211,13 +209,13 @@ def test_mixed_batch(model_id):
         max_new_tokens=96,
         padding_side="right",
         use_cache=True,
-        json_schema=schema,
+        filters=[json_filter(schema)],
     )[0]
 
     for i, out in enumerate(outs):
         print(f"\nRow {i}: {out.strip()} ...\n")
 
-    validate_json_strings(outs, schema)
+    validate_json_strings(outs, schema, raise_on_error=True)
 
     print(f"\n--- Mixed batch for {model_id} ---")
     for i, out in enumerate(outs):
@@ -263,4 +261,3 @@ def test_string_max_length_limit(model_id):
     assert len(frag["answer2"]) <= 10, (
         f"Expected <=10 chars, got {len(frag['answer2'])}: {frag['answer2']!r}"
     )
-
