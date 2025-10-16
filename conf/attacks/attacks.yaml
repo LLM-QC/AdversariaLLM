@@ -128,6 +128,42 @@ bon:
   word_scrambling: true
   random_capitalization: true
   ascii_perturbation: true
+crescendo:
+  name: crescendo
+  type: discrete
+  version: 0.1.0
+  generation_config: ${attacks._default.generation_config}
+  seed: ${attacks._default.seed}
+  max_rounds: 10
+  max_backtracks: 10
+  judge_temperature: 0.0
+  attack_model:
+    generation_config:
+      temperature: 0.7
+      top_p: 1.0
+      top_k: 0
+      max_new_tokens: 2048
+      num_return_sequences: 1
+    use_api: false
+    api_model_name: null # gpt-4o
+    id: google/gemma-3-12b-it
+    tokenizer_id: google/gemma-3-12b-it
+    short_name: Gemma
+    developer_name: Google
+    compile: False
+    dtype: bfloat16
+    chat_template: null
+    trust_remote_code: True
+  free_gen_repetition_filter:
+    repeat_set_size_max: 5
+    max_repeats: 10
+    penalty_duration: 2048
+    force_eos: True
+  json_repetition_filter:
+    repeat_set_size_max: 5
+    max_repeats: 10
+    penalty_duration: 2048
+    force_eos: False
 direct:
   name: direct
   type: discrete

@@ -10,12 +10,10 @@ from typing import Any, Literal, overload
 
 import torch
 import torch.nn.functional as F
-from transformers import (DynamicCache, HybridCache, PreTrainedModel,
-                          PreTrainedTokenizerBase)
+from transformers import DynamicCache, HybridCache, PreTrainedModel, PreTrainedTokenizerBase
 
-from ..types import JsonSchema
 from .batching import with_max_batchsize
-from .json_utils import JSONFilter, NullFilter, validate_json_strings
+from .filters import FILTER_REGISTRY, FilterPipeline, NullFilter, validate_json_strings
 from .sampling import top_k_filtering, top_p_filtering
 from .utils import get_stop_token_ids
 
@@ -155,7 +153,7 @@ def generate_ragged(
     top_p: float = ...,
     top_k: int = ...,
     num_return_sequences: int = ...,
-    json_schema: JsonSchema = ...,
+    filters: list[dict] | None = ...,
 ) -> list[list[torch.Tensor]]:
     ...
 
@@ -175,7 +173,7 @@ def generate_ragged(
     top_p: float = ...,
     top_k: int = ...,
     num_return_sequences: int = ...,
-    json_schema: JsonSchema = ...,
+    filters: list[dict] | None = ...,
 ) -> list[list[str]]:
     ...
 
@@ -195,12 +193,12 @@ def generate_ragged(
     top_p: float = ...,
     top_k: int = ...,
     num_return_sequences: int = ...,
-    json_schema: JsonSchema = ...,
+    filters: list[dict] | None = ...,
 ) -> list[list[str]] | list[list[torch.Tensor]]:
     ...
 
 
-@torch.no_grad
+@torch.no_grad()
 def generate_ragged(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
@@ -214,7 +212,7 @@ def generate_ragged(
     top_p: float = 1.0,
     top_k: int = 0,
     num_return_sequences: int = 1,
-    json_schema: JsonSchema | None = None
+    filters: list[dict] | None = None,
 ) -> list[list[str]] | list[list[torch.Tensor]]:
     """
     Generate completions for multiple prompts in a single batch.
@@ -306,7 +304,26 @@ def generate_ragged(
     embedding_layer = model.get_input_embeddings()
     idx_range = torch.arange(B, device=model.device)
     all_tokens = []
-    token_filter = JSONFilter(json_schema, tokenizer, B) if json_schema else NullFilter()
+
+    # Create filter pipeline
+    if filters:
+        filter_instances = []
+        for filter_config in filters:
+            filter_type = filter_config["type"]
+            params = {k: v for k, v in filter_config.items() if k != "type"}
+
+            # All filters get uniform parameters
+            filter_instances.append(FILTER_REGISTRY[filter_type](
+                batch_size=B,
+                tokenizer=tokenizer,
+                stop_token_ids=stop_ids,
+                **params
+            ))
+
+        token_filter = FilterPipeline(filter_instances)
+    else:
+        token_filter = NullFilter()
+
     prev_tokens = torch.full((B,), tokenizer.pad_token_id, device=model.device)
     for _ in range(num_return_sequences):
         tokens = torch.full((B, max_new_tokens), tokenizer.pad_token_id, device=model.device)
@@ -323,7 +340,7 @@ def generate_ragged(
             lengths = [
                 {
                     "padding": embeddings.size(1) - e.size(0),
-                    "generation": max_new_tokens - e.size(0),
+                    "generation": max_new_tokens + e.size(0),
                 }
                 for e in embedding_list
             ]
@@ -348,7 +365,7 @@ def generate_ragged(
                     logits_to_keep=1,
                 )
                 logits = outputs.logits[:, -1].clone()
-                logits = token_filter.step(prev_tokens, logits)
+                logits = token_filter.step(prev_tokens, logits, ~finished)
                 next_tokens = sample_next_token(logits)
                 padded_embeddings[idx_range, next_token_idx] = (
                     embedding_layer(next_tokens).detach()
@@ -432,7 +449,7 @@ def generate_ragged(
 
                     logits_out = torch.empty((B, logits.size(1)), dtype=model.dtype, device=model.device)
                     logits_out[~finished] = logits
-                    logits_out = token_filter.step(prev_tokens, logits_out)
+                    logits_out = token_filter.step(prev_tokens, logits_out, generating)
                     next_tokens = torch.full((B,), tokenizer.eos_token_id, device=model.device)
                     next_tokens[generating] = sample_next_token(logits_out[generating])
                     prev_tokens.fill_(tokenizer.pad_token_id)
@@ -465,7 +482,7 @@ def generate_ragged(
                     logits = model(
                         inputs_embeds=padded_embeddings[:, : next_token_idx.max()]
                     ).logits[torch.arange(B), next_token_idx - 1].clone()
-                    logits = token_filter.step(prev_tokens, logits)
+                    logits = token_filter.step(prev_tokens, logits, ~finished)
                     next_tokens = sample_next_token(logits)
                     padded_embeddings[idx_range, next_token_idx] = embedding_layer(next_tokens)
                     tokens[:, i] = next_tokens
@@ -496,8 +513,14 @@ def generate_ragged(
     stop_tokens = tokenizer.convert_ids_to_tokens(stop_ids)
     completion = [tokenizer.batch_decode(all_tokens[i], skip_special_tokens=False) for i in range(B)]
     completion = [[min([c.split(t)[0] for t in stop_tokens], key=len) for c in completion[i]] for i in range(B)]
-    if json_schema:
-        validate_json_strings([gen for comp in completion for gen in comp], json_schema)
+
+    # Validate JSON outputs if any JSON filters are configured
+    if filters:
+        for filter_config in filters:
+            if filter_config.get("type") == "json" and filter_config.get("validate_output", True):
+                schema = filter_config["schema"]
+                raise_on_error = filter_config.get("raise_on_error", True)
+                validate_json_strings([gen for comp in completion for gen in comp], schema, raise_on_error)
 
     return completion
 

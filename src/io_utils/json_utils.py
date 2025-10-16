@@ -6,9 +6,13 @@ encoding and caching for efficient file operations.
 """
 
 import json
+import json5
+import logging
 import os
 
 import orjson
+
+from ..types import Conversation
 
 
 class CompactJSONEncoder(json.JSONEncoder):
@@ -135,3 +139,43 @@ def cached_json_load(path):
     data = orjson.loads(open(path, "rb").read())
     JSON_CACHE[path] = (mod_time, data)
     return data
+
+
+# basic json parsing
+
+def safe_parse_json_responses(convs: list[Conversation], attempt: int, dummy_result: None | dict = None):
+    """ if dummy_result is None, None will be returned on parse error"""
+
+    responses = [conv[-1]["content"] for conv in convs]
+    jsons = [None] * len(responses)
+    parse_unsuccessful_map = [False] * len(responses)
+    error_messages = []
+
+    for i, response in enumerate(responses):
+        try:
+            jsons[i] = parse_json_response(response)
+        except Exception as e:
+            logging.error(f"Error in parsing JSON attempt {attempt}: {e} Response: {response} Conv: {convs[i]}")
+            parse_unsuccessful_map[i] = True
+            error_messages.append(str(e))
+            if dummy_result:
+                logging.info("Falling back to dummy result.")
+                jsons[i] = dummy_result
+
+    return jsons, parse_unsuccessful_map, error_messages
+
+
+def parse_json_response(output: str) -> dict:
+    """Parse a single JSON response, tolerating extra text around the object."""
+    if "{" in output:
+        if "}" not in output:
+            output += "}"
+        start = output.index("{")
+        end = output.rindex("}")
+        output = output[start : end + 1]
+    return json5.loads(output)
+
+
+def batch_parse_json_response(output: list[str]) -> list[dict]:
+    """Parse a list of JSON responses."""
+    return [parse_json_response(item) for item in output]
