@@ -138,6 +138,66 @@ def generate_ragged_batched(
     return outputs
 
 
+@overload
+def generate_ragged(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    embedding_list: list[torch.FloatTensor] | None = ...,
+    token_list: list[torch.LongTensor] | None = ...,
+    *,
+    max_new_tokens: int = ...,
+    return_tokens: Literal[True],
+    padding_side: Literal["left", "right"] = ...,
+    use_cache: bool = ...,
+    temperature: float = ...,
+    top_p: float = ...,
+    top_k: int = ...,
+    num_return_sequences: int = ...,
+    filters: list[dict] | None = ...,
+) -> list[list[torch.Tensor]]:
+    ...
+
+
+@overload
+def generate_ragged(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    embedding_list: list[torch.FloatTensor] | None = ...,
+    token_list: list[torch.LongTensor] | None = ...,
+    *,
+    max_new_tokens: int = ...,
+    return_tokens: Literal[False] = ...,
+    padding_side: Literal["left", "right"] = ...,
+    use_cache: bool = ...,
+    temperature: float = ...,
+    top_p: float = ...,
+    top_k: int = ...,
+    num_return_sequences: int = ...,
+    filters: list[dict] | None = ...,
+) -> list[list[str]]:
+    ...
+
+
+@overload
+def generate_ragged(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    embedding_list: list[torch.FloatTensor] | None = ...,
+    token_list: list[torch.LongTensor] | None = ...,
+    *,
+    max_new_tokens: int = ...,
+    return_tokens: bool = ...,
+    padding_side: Literal["left", "right"] = ...,
+    use_cache: bool = ...,
+    temperature: float = ...,
+    top_p: float = ...,
+    top_k: int = ...,
+    num_return_sequences: int = ...,
+    filters: list[dict] | None = ...,
+) -> list[list[str]] | list[list[torch.Tensor]]:
+    ...
+
+
 @torch.no_grad()
 def generate_ragged(
     model: PreTrainedModel,
