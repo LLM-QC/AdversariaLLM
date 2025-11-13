@@ -94,7 +94,7 @@ def test_refusal_direction_dataset():
     from src.dataset import RefusalDirectionDataConfig, RefusalDirectionDataDataset
 
     config = RefusalDirectionDataConfig(
-        name="refusal_direction_data",
+        name="refusal_direction",
         path="./data/refusal_direction/",
         split="train",
         type="harmless",

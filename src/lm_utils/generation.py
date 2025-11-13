@@ -474,8 +474,8 @@ def generate_ragged(
                             break
 
                         for layer in past_key_values.layers:
-                            layer.keys = layer.keys[still_active].clone()
-                            layer.values = layer.values[still_active].clone()
+                            layer.keys = layer.keys[still_active.to(layer.keys.device)].clone()
+                            layer.values = layer.values[still_active.to(layer.values.device)].clone()
 
                     next_token_idx[next_token_idx == cur_idx] += 1
                     lengths[generating] += 1

@@ -10,7 +10,7 @@ Implementation of a one-hot-input space continuous attack with discretization.
 
 Also implements a discretization attack based on Geisler et al. (2024).
 WARNING: This implementation currently lacks some of the features of the reference implementation
-and leads to worse results. This will be fixed in a future version. 
+and leads to worse results. This will be fixed in a future version.
 Use https://github.com/sigeisler/reinforce-attacks-llms to reproduce official results.
 """
 import copy
@@ -46,15 +46,15 @@ class LRSchedulerConfig:
 class PGDDiscreteConfig:
     name: str = "pgd_discrete"
     type: str = "hybrid"
+    version: str = "0.0.1"
     placement: str = "suffix"
-    version: str = ""
     num_steps: int = 5000
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     seed: int = 0
     optim_str_init: str = "x x x x x x x x x x x x x x x x x x x x"
     optimizer: Literal["Adam", "SAM"] = "Adam"
     projection: Literal["l2", "simplex", "l1", None] = "simplex"
-    alpha: float = 0.001
+    alpha: float = 0.1
     restart_every: int = 100
     lr_scheduler: LRSchedulerConfig = field(default_factory=LRSchedulerConfig)
     # New parameters to match reference implementation
@@ -288,8 +288,8 @@ class PGDDiscreteAttack(Attack):
                  loss_per_sample, _ = self._calculate_continuous_loss(
                      model, perturbed_one_hots, emb_matrix, attention_mask, y_batch, target_masks_batch
                  )
-                 mean_loss = loss_per_sample.mean()
-                 mean_loss.backward()
+                 total_loss = loss_per_sample.sum()
+                 total_loss.backward()
                  # Modify gradients again before second step update
                  self._modify_gradient(perturbed_one_hots.grad, attack_masks_batch, disallowed_ids)
 
@@ -530,9 +530,9 @@ class PGDDiscreteAttack(Attack):
             loss_per_sample, _ = self._calculate_continuous_loss(
                 model, perturbed_one_hots, emb_matrix, attention_mask_batch, y_batch, target_masks_batch
             )
-            mean_loss = loss_per_sample.mean()
-            relaxed_loss = {"mean": mean_loss.item(), "per_sample": loss_per_sample}
-            mean_loss.backward()
+            total_loss = loss_per_sample.sum()
+            relaxed_loss = {"mean": loss_per_sample.mean().item(), "per_sample": loss_per_sample}
+            total_loss.backward()
 
             # Modify gradients (before optimizer step)
             self._modify_gradient(perturbed_one_hots.grad, attack_masks_batch, disallowed_ids)

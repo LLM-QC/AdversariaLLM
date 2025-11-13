@@ -31,8 +31,8 @@ xs_test:
   seed: 0
   idx: null
   shuffle: true
-refusal_direction_data:
-  name: refusal_direction_data
+refusal_direction:
+  name: refusal_direction
   path: ${root_dir}/data/refusal_direction/
   split: train
   type: harmful

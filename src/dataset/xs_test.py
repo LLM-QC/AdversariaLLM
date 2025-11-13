@@ -43,5 +43,6 @@ class XSTestDataset(PromptDataset):
         msg = self.messages[idx]
         conversation = [
             {"role": "user", "content": msg},
+            {"role": "assistant", "content": ""},
         ]
         return conversation
