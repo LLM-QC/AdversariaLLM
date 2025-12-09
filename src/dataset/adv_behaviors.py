@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from src.types import Conversation
+from ..types import Conversation
 
 from .prompt_dataset import PromptDataset
 
@@ -21,12 +21,16 @@ from .prompt_dataset import PromptDataset
 @dataclass
 class AdvBehaviorsConfig:
     name: str = "adv_behaviors"
-    messages_path: str = "./data/behavior_datasets/harmbench_behaviors_text_all.csv"
+    all_messages_path: str = "./data/behavior_datasets/harmbench_behaviors_text_all.csv"
+    val_messages_path: str = "./data/behavior_datasets/harmbench_behaviors_text_val.csv"
+    test_messages_path: str = "./data/behavior_datasets/harmbench_behaviors_text_test.csv"
     targets_path: str = "./data/optimizer_targets/harmbench_targets_text.json"
-    categories: tuple[str, ...] = ('chemical_biological', 'illegal', 'misinformation_disinformation', 'harmful', 'harassment_bullying', 'cybercrime_intrusion')
+    semantic_categories: tuple[str, ...] = ('chemical_biological', 'illegal', 'misinformation_disinformation', 'harmful', 'harassment_bullying', 'cybercrime_intrusion')
+    functional_categories: tuple[str, ...] = ('standard', 'contextual', 'copyright')
     seed: int = 0
     idx: list[int] | int | str | None = None
     shuffle: bool = True
+    split: str = "all"  # options: "all", "val", "test"
 
 
 @PromptDataset.register("adv_behaviors")
@@ -34,11 +38,23 @@ class AdvBehaviorsDataset(PromptDataset):
     def __init__(self, config: AdvBehaviorsConfig):
         super().__init__(config)
 
-        logging.info(f"Loading dataset from {config.messages_path}")
+        if config.split == "all":
+            messages_path = config.all_messages_path
+        elif config.split == "val":
+            messages_path = config.val_messages_path
+        elif config.split == "test":
+            messages_path = config.test_messages_path
+        else:
+            raise ValueError(f"Unknown split: {config.split}")
+
+        logging.info(f"Loading dataset from {messages_path}")
         logging.info(f"Current working directory: {os.getcwd()}")
 
-        self.messages = pd.read_csv(config.messages_path, header=0)
-        self.messages = self.messages[self.messages["SemanticCategory"].isin(config.categories)]
+        self.messages = pd.read_csv(messages_path, header=0)
+        self.messages = self.messages[
+            self.messages["SemanticCategory"].isin(config.semantic_categories) &
+            self.messages["FunctionalCategory"].isin(config.functional_categories)
+            ]
         targets = pd.read_json(config.targets_path, typ="series")
         self.targets = self.messages[self.messages.columns[-1]].map(targets)
         assert len(self.messages) == len(self.targets), "Mismatched lengths"

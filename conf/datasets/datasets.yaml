@@ -1,11 +1,15 @@
 adv_behaviors:
   name: adv_behaviors
-  messages_path: ${root_dir}/data/behavior_datasets/harmbench_behaviors_text_all.csv
+  all_messages_path: ${root_dir}/data/behavior_datasets/harmbench_behaviors_text_all.csv
+  val_messages_path: ${root_dir}/data/behavior_datasets/harmbench_behaviors_text_val.csv
+  test_messages_path: ${root_dir}/data/behavior_datasets/harmbench_behaviors_text_test.csv
   targets_path: ${root_dir}/data/optimizer_targets/harmbench_targets_text.json
-  categories: ['chemical_biological', 'illegal', 'misinformation_disinformation', 'harmful', 'harassment_bullying', 'cybercrime_intrusion'] #,'copyright']
+  semantic_categories: ['chemical_biological', 'illegal', 'misinformation_disinformation', 'harmful', 'harassment_bullying', 'cybercrime_intrusion'] #,'copyright']
+  functional_categories: ['standard', 'contextual', 'copyright']
   seed: 0
   idx: null
   shuffle: true
+  split: all  # options: all, val, test
 alpaca:
   name: alpaca
   seed: 0
