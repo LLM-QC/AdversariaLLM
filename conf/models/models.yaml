@@ -149,7 +149,7 @@ LLM-LAT/robust-llama3-8b-instruct:
   developer_name: LLM-LAT
   compile: False
   dtype: bfloat16
-  chat_template: llama-3-instruct
+  chat_template: null # LAT was trained with standard hf chat template, which is none
   trust_remote_code: True
 qwen/Qwen2-7B-Instruct:
   id: qwen/Qwen2-7B-Instruct
@@ -250,7 +250,7 @@ GraySwanAI/Llama-3-8B-Instruct-RR:
   developer_name: GraySwanAI
   compile: False
   dtype: bfloat16
-  chat_template: llama-3-instruct
+  chat_template: null # CB was trained with standard hf chat template, which is none
   trust_remote_code: True
 GraySwanAI/Mistral-7B-Instruct-RR:
   id: GraySwanAI/Mistral-7B-Instruct-RR
