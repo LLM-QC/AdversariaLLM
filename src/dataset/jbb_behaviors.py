@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import jailbreakbench as jbb
 
-from src.types import Conversation
+from ..types import Conversation
 
 from .prompt_dataset import PromptDataset
 

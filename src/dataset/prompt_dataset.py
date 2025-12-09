@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from typing import ClassVar, Type
 
 import torch
-from src.types import Conversation
+from ..types import Conversation
 
 
 class PromptDataset(torch.utils.data.Dataset):

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from datasets import load_dataset
 
-from src.types import Conversation
+from ..types import Conversation
 
 from .prompt_dataset import PromptDataset
 

@@ -936,7 +936,7 @@ class SubstitutionSelectionStrategy:
 # Code below is to get the refusal direction for a particular model                    #
 # Not directly relevant to the optimization itself.                                    #
 # -------------------------------------------------------------------------------------#
-from src.dataset import RefusalDirectionDataDataset, RefusalDirectionDataConfig
+from ..dataset import RefusalDirectionDataDataset, RefusalDirectionDataConfig
 from tqdm import tqdm
 from functools import partial
 import contextlib
