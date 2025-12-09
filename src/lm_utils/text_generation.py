@@ -109,6 +109,90 @@ class RetryPolicy:
             local=self.local.merge(overrides.local if overrides else None),
         )
 
+# Retry policy definitions are kept here to avoid scattered backbone-specific configuration.
+
+
+@dataclass
+class APIRetryOverrides:
+    max_attempts: Optional[int] = None
+    sleep_seconds: Optional[float] = None
+    backoff: Optional[float] = None
+
+
+@dataclass
+class LocalRetryOverrides:
+    max_attempts: Optional[int] = None
+    temperature_schedule: Optional[List[Optional[float]]] = None # Nones in the list will be set to the temperature argument
+
+
+@dataclass
+class RetryOverrides:
+    api: Optional[APIRetryOverrides] = None
+    local: Optional[LocalRetryOverrides] = None
+
+
+@dataclass
+class APIRetryPolicy:
+    max_attempts: int = 3
+    sleep_seconds: float = 1.0
+    backoff: float = 1.5
+
+    def merge(self, overrides: Optional[APIRetryOverrides]) -> "APIRetryPolicy":
+        if not overrides:
+            return APIRetryPolicy(self.max_attempts, self.sleep_seconds, self.backoff)
+        max_attempts = overrides.max_attempts if overrides.max_attempts is not None else self.max_attempts
+        if max_attempts <= 0:
+            max_attempts = 1
+        sleep_seconds = overrides.sleep_seconds if overrides.sleep_seconds is not None else self.sleep_seconds
+        if sleep_seconds < 0:
+            sleep_seconds = 0.0
+        backoff = overrides.backoff if overrides.backoff is not None else self.backoff
+        if backoff < 1.0:
+            backoff = 1.0
+        return APIRetryPolicy(max_attempts=max_attempts, sleep_seconds=sleep_seconds, backoff=backoff)
+
+
+@dataclass
+class LocalRetryPolicy:
+    temperature_schedule: List[Optional[float]] = field(default_factory=lambda: [None]) # Nones in the list will be set to the temperature argument
+    max_attempts: Optional[int] = 1
+
+    def merge(self, overrides: Optional[LocalRetryOverrides]) -> "LocalRetryPolicy":
+        schedule = list(self.temperature_schedule)
+        max_attempts = self.max_attempts
+
+        if overrides:
+            if overrides.temperature_schedule is not None:
+                schedule = overrides.temperature_schedule
+            if overrides.max_attempts is not None:
+                max_attempts = overrides.max_attempts
+
+        if not schedule:
+            schedule = [None]
+
+        attempts = max_attempts if max_attempts is not None else len(schedule)
+        if attempts is None or attempts <= 0:
+            attempts = 1
+
+        if len(schedule) < attempts:
+            schedule = schedule + [schedule[-1]] * (attempts - len(schedule))
+        else:
+            schedule = schedule[:attempts]
+
+        return LocalRetryPolicy(temperature_schedule=schedule, max_attempts=attempts)
+
+
+@dataclass
+class RetryPolicy:
+    api: APIRetryPolicy = APIRetryPolicy()
+    local: LocalRetryPolicy = LocalRetryPolicy()
+
+    def merge(self, overrides: Optional[RetryOverrides]) -> "RetryPolicy":
+        return RetryPolicy(
+            api=self.api.merge(overrides.api if overrides else None),
+            local=self.local.merge(overrides.local if overrides else None),
+        )
+
 
 @dataclass
 class GenerationResult:
