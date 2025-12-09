@@ -1,4 +1,5 @@
 import os
+os.umask(0o002)
 from datetime import datetime
 
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # determinism
