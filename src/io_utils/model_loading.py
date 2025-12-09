@@ -6,11 +6,13 @@ and tokenizers with various optimizations and model-specific configurations.
 """
 
 import gc
+import logging
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -22,11 +24,23 @@ from transformers.utils.logging import disable_progress_bar
 
 disable_progress_bar()  # disable progress bar for model loading
 
+_UNSET = object()
+
 
 def load_model_and_tokenizer(
-    model_params: DictConfig | dict,
+    model_params: DictConfig | dict | None = None,
+    *,
+    id: str | object = _UNSET,
+    tokenizer_id: str | object = _UNSET,
+    short_name: str | object = _UNSET,
+    developer_name: str | object = _UNSET,
+    compile: bool | object = _UNSET,
+    dtype: str | object = _UNSET,
+    chat_template: str | object = _UNSET,
+    trust_remote_code: bool | object = _UNSET,
+    attn_implementation: str | object = _UNSET,
 ) -> tuple[PreTrainedModel, PreTrainedTokenizerBase]:
-    """Load a model and tokenizer from a model parameters configuration.
+    """Load a model and tokenizer.
 
     Why do we need this?
     Technically, AutoModelForCausalLM.from_pretrained() and AutoTokenizer.from_pretrained()
@@ -37,14 +51,51 @@ def load_model_and_tokenizer(
     - chat_template is not set correctly
     - etc.
 
-    Args:
-        model_params: A configuration object or dictionary containing model parameters.
+    Usage:
+    - If you already have the Hydra config (run_attacks path), pass the DictConfig/dict via ``model_params``.
+    - Otherwise, call with keyword args like ``id=...``. If the id is in ``conf/models/models.yaml``, that
+      preset supplies defaults and only the fields you set are overridden. If the id is not in the presets,
+      we log an info message and fall back to safe defaults (tokenizer_id=id, dtype=None, compile=False,
+      trust_remote_code=True, chat_template=None → HF default).
 
+      Example usage:
+        model, tokenizer = load_model_and_tokenizer(
+            id="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            dtype="bfloat16",
+            trust_remote_code=True,
+        )
+
+        model, tokenizer = load_model_and_tokenizer(
+            model_params=hydra_cfg.model_params
+        )
+
+    Args:
+        model_params: Optional DictConfig/dict with model configuration.
+        id: Model identifier (HuggingFace model ID or local path).
+        tokenizer_id: Tokenizer identifier (HuggingFace model ID or local path).
+        short_name: Short name for the model.
+        developer_name: Developer name for the model.
+        compile: Whether to compile the model with torch.compile().
+        dtype: Data type for model weights (e.g., "float16", "bfloat16", "int8", "int4").
+        chat_template: Name of the chat template to use.
+        trust_remote_code: Whether to trust remote code when loading the model/tokenizer.
+        attn_implementation: Attention implementation to use (model-specific).
+        
     Returns:
         A tuple containing the loaded model and tokenizer.
     """
-    if not isinstance(model_params, DictConfig):
-        model_params = DictConfig(model_params)
+    model_params = load_model_config(
+        model_params,
+        id=id,
+        tokenizer_id=tokenizer_id,
+        short_name=short_name,
+        developer_name=developer_name,
+        compile=compile,
+        dtype=dtype,
+        chat_template=chat_template,
+        trust_remote_code=trust_remote_code,
+        attn_implementation=attn_implementation,
+    )
 
     gc.collect()
     torch.cuda.empty_cache()
@@ -158,6 +209,112 @@ def load_model_and_tokenizer(
 
     assert tokenizer.pad_token is not None, "pad_token is not set"
     return model, tokenizer
+
+
+def load_model_config(
+    model_params: DictConfig | dict | None = None,
+    *,
+    id: str | object = _UNSET,
+    tokenizer_id: str | object = _UNSET,
+    short_name: str | object = _UNSET,
+    developer_name: str | object = _UNSET,
+    compile: bool | object = _UNSET,
+    dtype: str | object = _UNSET,
+    chat_template: str | object = _UNSET,
+    trust_remote_code: bool | object = _UNSET,
+    attn_implementation: str | object = _UNSET,
+) -> DictConfig:
+    """Normalize model configuration from either model_params or explicit kwargs.
+
+    If model_params is provided (DictConfig/dict from Hydra), other kwargs must
+    stay unset. Otherwise, kwargs are used; presets are pulled by id when present
+    and then overridden by any explicitly provided kwargs.
+    """
+
+    # Branch 1: model_params provided (Hydra path)
+    if model_params is not None:
+        if any(x is not _UNSET for x in [id, tokenizer_id, short_name, developer_name, compile, dtype, chat_template, trust_remote_code, attn_implementation]):
+            raise ValueError("Pass either model_params or explicit kwargs, not both.")
+        if isinstance(model_params, DictConfig):
+            return model_params
+        if isinstance(model_params, dict):
+            return DictConfig(model_params)
+        raise TypeError("model_params must be a dict or DictConfig.")
+
+    # Branch 2: explicit kwargs path
+    lookup_name = id if id is not _UNSET else None
+    if lookup_name is None:
+        raise ValueError("Provide model_params or id= to select a model.")
+
+    # load presets (models.yaml) and lookup id
+    presets = _load_presets()
+    base = presets.get(lookup_name, {})
+    if not base:
+        logging.info(
+            "Preset '%s' not found in models.yaml; using defaults and HF chat template.",
+            lookup_name,
+        )
+
+    final_config: dict[str, Any] = {}
+    final_config.update(base)
+
+    # user overrides
+    overrides = {
+        "id": id,
+        "tokenizer_id": tokenizer_id,
+        "short_name": short_name,
+        "developer_name": developer_name,
+        "compile": compile,
+        "dtype": dtype,
+        "chat_template": chat_template,
+        "trust_remote_code": trust_remote_code,
+        "attn_implementation": attn_implementation,
+    }
+    for key, value in overrides.items():
+        if value is not _UNSET:
+            final_config[key] = value
+
+    # general defaults to fall back on
+    defaults = {
+        "id": lookup_name,
+        "tokenizer_id": lookup_name,
+        "short_name": None,
+        "developer_name": None,
+        "compile": False,
+        "dtype": None,
+        "chat_template": None,
+        "trust_remote_code": True,
+        "attn_implementation": None,
+    }
+    for key, default in defaults.items():
+        if key not in final_config or final_config[key] is None:
+            final_config[key] = default
+
+    return DictConfig(final_config)
+
+
+def list_model_presets() -> list[str]:
+    """List available model preset names from models.yaml."""
+
+    return sorted(_load_presets().keys())
+
+
+def _load_presets() -> dict[str, dict[str, Any]]:
+    """Load model presets from models.yaml, returning a plain dictionary."""
+
+    path = _default_models_file()
+    if not path.exists():
+        logging.info("Preset file %s not found; skipping preset lookup.", path)
+        return {}
+    presets = OmegaConf.load(path)
+    data = OmegaConf.to_container(presets, resolve=True)
+    if not isinstance(data, dict):
+        return {}
+    return data or {}
+
+
+def _default_models_file() -> Path:
+    return Path(__file__).parent.parent.parent / "conf" / "models" / "models.yaml"
 
 
 def load_chat_template(template_name: str) -> str:
