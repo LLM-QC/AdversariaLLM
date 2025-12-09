@@ -1,7 +1,7 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
 setup(
     name="adversariallm",  # Replace with your package name
     version="0.0.1",  # Starting version
-    packages=find_packages(),  # Automatically find packages in the directory
+    packages=["adversariallm"],  # Automatically find packages in the directory
 )

@@ -21,6 +21,7 @@ pip install -r requirements.txt
 
 3. Install the package in development mode:
 ```bash
+ln -s ./src/ ./adversariallm # Soft link from src to adversariallm, to be able to import like: adversariallm.module
 pip install -e .
 ```
 
