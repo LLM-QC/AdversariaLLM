@@ -450,6 +450,8 @@ def generate_ragged(
                     ).logits[:, 0].clone()  # (B, vocab_size)
 
                     logits_out = torch.empty((B, logits.size(1)), dtype=model.dtype, device=model.device)
+                    if logits.dtype != logits_out.dtype:
+                        logits = logits.to(logits_out.dtype)
                     logits_out[~finished] = logits
                     logits_out = token_filter.step(prev_tokens, logits_out, generating)
                     next_tokens = torch.full((B,), tokenizer.eos_token_id, device=model.device)
