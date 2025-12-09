@@ -13,6 +13,6 @@ max_num_timeout: 0
 additional_parameters: {}
 setup: []
 gres: gpu:1
-mem_gb: 16
-cpus_per_task: 4
+mem_gb: 128
+cpus_per_task: 16
 partition: gpu_h100

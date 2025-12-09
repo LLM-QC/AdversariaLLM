@@ -15,4 +15,4 @@ setup: []
 gres: gpu:1
 mem_gb: 128
 cpus_per_task: 16
-partition: gpu_a100,gpu_h100
+partition: gpu_a100,gpu_h100,gpu_h200
