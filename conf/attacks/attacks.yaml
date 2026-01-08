@@ -264,6 +264,14 @@ human_jailbreaks:
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
   num_steps: 1
+inpainting:
+  name: inpainting
+  type: discrete
+  version: 0.0.1
+  generation_config: ${attacks._default.generation_config}
+  seed: ${attacks._default.seed}
+  custom_data_path: null
+  num_samples_per_behavior: 1024
 pair:
   name: pair
   type: discrete
