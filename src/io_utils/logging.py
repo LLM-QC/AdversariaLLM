@@ -59,12 +59,17 @@ def log_attack(run_config, result: AttackResult, cfg: DictConfig, date_time_stri
         offload_tensors(subrun_config, subrun_result, embed_dir)
 
         log_message.update(asdict(subrun_result))
-        # Find the first available run_i.json file
+        # Find and reserve the first available run_i directory atomically.
         i = 0
         log_dir = os.path.join(save_dir, date_time_string)
-        while os.path.exists(os.path.join(log_dir, str(i), f"run.json")):
-            i += 1
-        log_file = os.path.join(log_dir, str(i), f"run.json")
+        while True:
+            run_dir = os.path.join(log_dir, str(i))
+            try:
+                os.makedirs(run_dir, exist_ok=False)
+                break
+            except FileExistsError:
+                i += 1
+        log_file = os.path.join(run_dir, "run.json")
 
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
         with open(log_file, "w") as f:
