@@ -13,6 +13,7 @@ from typing import Any
 
 import torch
 from omegaconf import DictConfig, OmegaConf
+from peft import PeftModel
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -39,6 +40,7 @@ def load_model_and_tokenizer(
     chat_template: str | object = _UNSET,
     trust_remote_code: bool | object = _UNSET,
     attn_implementation: str | object = _UNSET,
+    peft_path: str | object = _UNSET,
 ) -> tuple[PreTrainedModel, PreTrainedTokenizerBase]:
     """Load a model and tokenizer.
 
@@ -80,7 +82,8 @@ def load_model_and_tokenizer(
         chat_template: Name of the chat template to use.
         trust_remote_code: Whether to trust remote code when loading the model/tokenizer.
         attn_implementation: Attention implementation to use (model-specific).
-        
+        peft_path: Path to the peft weights. Should be None in regular loading.
+
     Returns:
         A tuple containing the loaded model and tokenizer.
     """
@@ -95,6 +98,7 @@ def load_model_and_tokenizer(
         chat_template=chat_template,
         trust_remote_code=trust_remote_code,
         attn_implementation=attn_implementation,
+        peft_path=peft_path,
     )
 
     gc.collect()
@@ -143,11 +147,17 @@ def load_model_and_tokenizer(
                 device_map="auto",
             ).eval()
     model: PreTrainedModel
+    if model_params.peft_path:
+        model = PeftModel.from_pretrained(model, model_params.peft_path)
+        model = model.merge_and_unload()
+        model.eval()
     if model_params.compile:
         model = torch.compile(model)  # type: ignore
 
+
     model.config.short_name = model_params.short_name
     model.config.developer_name = model_params.developer_name
+
     tokenizer = AutoTokenizer.from_pretrained(
         model_params.tokenizer_id,
         trust_remote_code=model_params.trust_remote_code,
@@ -223,6 +233,7 @@ def load_model_config(
     chat_template: str | object = _UNSET,
     trust_remote_code: bool | object = _UNSET,
     attn_implementation: str | object = _UNSET,
+    peft_path: str | object = _UNSET,
 ) -> DictConfig:
     """Normalize model configuration from either model_params or explicit kwargs.
 
@@ -233,13 +244,15 @@ def load_model_config(
 
     # Branch 1: model_params provided (Hydra path)
     if model_params is not None:
-        if any(x is not _UNSET for x in [id, tokenizer_id, short_name, developer_name, compile, dtype, chat_template, trust_remote_code, attn_implementation]):
+        if any(x is not _UNSET for x in [id, tokenizer_id, short_name, developer_name, compile, dtype, chat_template, trust_remote_code, attn_implementation, peft_path]):
             raise ValueError("Pass either model_params or explicit kwargs, not both.")
-        if isinstance(model_params, DictConfig):
-            return model_params
         if isinstance(model_params, dict):
-            return DictConfig(model_params)
-        raise TypeError("model_params must be a dict or DictConfig.")
+            model_params = DictConfig(model_params)
+
+        if "peft_path" not in model_params or model_params.peft_path is None:
+            model_params.peft_path = None
+
+        return model_params
 
     # Branch 2: explicit kwargs path
     lookup_name = id if id is not _UNSET else None
@@ -269,6 +282,7 @@ def load_model_config(
         "chat_template": chat_template,
         "trust_remote_code": trust_remote_code,
         "attn_implementation": attn_implementation,
+        "peft_path": peft_path,
     }
     for key, value in overrides.items():
         if value is not _UNSET:
@@ -285,10 +299,12 @@ def load_model_config(
         "chat_template": None,
         "trust_remote_code": True,
         "attn_implementation": None,
+        "peft_path": None,
     }
     for key, default in defaults.items():
         if key not in final_config or final_config[key] is None:
             final_config[key] = default
+            # DEBUG: check if peft_path is actually set here, it should
 
     return DictConfig(final_config)
 
