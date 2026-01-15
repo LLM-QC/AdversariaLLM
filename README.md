@@ -75,6 +75,7 @@ The framework supports various adversarial attack algorithms:
 - **Direct** - Direct prompt testing without optimization
 - **BEAST** - Gradient-based discrete optimization
 - **Best-of-N** - Jailbreaking with simple string perturbations
+- **Inpainting** - Diffusion-based inpainting attacks
 
 
 ## 📊 Evaluation and Judging
