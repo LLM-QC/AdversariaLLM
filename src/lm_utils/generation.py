@@ -559,17 +559,23 @@ def get_losses_batched(
         raise ValueError("Either embedding_list or token_list must be provided.")
     if embedding_list is not None:
         assert all(e.ndim == 2 for e in embedding_list), "Embeddings must be 2D."
-        embedding_list = [e.to(model.device) for e in embedding_list]
     if token_list is not None:
         assert all(t.ndim == 1 for t in token_list), "Tokens must be 1D."
-        token_list = [t.to(model.device) for t in token_list]
-        embedding_list = [
-            model.get_input_embeddings()(t.unsqueeze(0))[0] for t in token_list
-        ]
-    assert embedding_list is not None
     assert all(t.ndim == 1 for t in targets), "Targets must be 1D."
 
-    def get_losses_func(embedding_list, targets):
+    input_list = embedding_list if embedding_list is not None else token_list
+    assert input_list is not None
+    input_type = "embeddings" if embedding_list is not None else "tokens"
+
+    def get_losses_func(input_list, targets):
+        if input_type == "embeddings":
+            embedding_list = [e.to(model.device) for e in input_list]
+        else:
+            token_list = [t.to(model.device) for t in input_list]
+            lengths = [t.size(0) for t in token_list]
+            concatenated_tokens = torch.cat(token_list)
+            concatenated_embeddings = model.get_input_embeddings()(concatenated_tokens)
+            embedding_list = list(torch.split(concatenated_embeddings, lengths))
         # We first pad the embeddings to the maximum context length of the model.
         B = len(embedding_list)
         if padding_side == "left":
@@ -638,17 +644,17 @@ def get_losses_batched(
         return losses
 
     if initial_batch_size is None:
-        initial_batch_size = len(embedding_list)
+        initial_batch_size = len(input_list)
 
     # Shorter sequences will come first to maximize batch size
-    sorted_indexed_inputs = sorted(list(enumerate(embedding_list)), key=lambda x: x[1].size(0))
+    sorted_indexed_inputs = sorted(list(enumerate(input_list)), key=lambda x: x[1].size(0))
     sorted_input_list = [item for _, item in sorted_indexed_inputs]
     original_indices = [index for index, _ in sorted_indexed_inputs]
     sorted_targets = [targets[i] for i in original_indices]
     losses = with_max_batchsize(get_losses_func, sorted_input_list, sorted_targets, initial_batch_size=initial_batch_size, verbose=verbose)
     # Reorder losses to match original order
     # Unsort the outputs to match the original input order
-    outputs = [None] * len(embedding_list)
+    outputs = [None] * len(input_list)
     for i, original_index in enumerate(original_indices):
         outputs[original_index] = losses[i] # (T,)
     return outputs
