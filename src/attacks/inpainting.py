@@ -34,7 +34,7 @@ class InpaintingConfig:
     # TODO: change this before merging with main!
     # Use offical huggingface dataset later
     data_path: str = "/ceph/ssd/staff/dornb/data/diffusion/jbb_inpainting_limbach_0-0-1.csv"
-    num_samples_per_behavior: int = 1024 # TODO: add this functionality!
+    num_samples_per_behavior: int = 1024
 
 
 class InpaintingAttack(Attack):
@@ -45,6 +45,14 @@ class InpaintingAttack(Attack):
         # and the model is prompted with the inpainted prompt.
 
         self.inpainting_data = pd.read_csv(config.data_path)
+        # limit to num_samples_per_behavior if specified. sample with specific seed for reproducibility
+        if config.num_samples_per_behavior is not None:
+            self.inpainting_data = self.inpainting_data.groupby('original_prompt').apply(
+                lambda x: x.sample(n=min(config.num_samples_per_behavior, len(x)), random_state=config.seed),
+                include_groups=False,
+            ).reset_index(level=0)
+        assert all(self.inpainting_data['original_prompt'].value_counts() == config.num_samples_per_behavior), \
+            "Not all behaviors have the specified number of inpainting samples after sampling."
 
     @torch.no_grad
     def run(
