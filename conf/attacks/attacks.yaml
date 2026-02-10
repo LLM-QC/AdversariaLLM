@@ -270,7 +270,7 @@ inpainting:
   version: 0.0.1
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
-  data_path: "/ceph/ssd/staff/dornb/data/diffusion/jbb_inpainting_limbach_0-0-1.csv"
+  custom_data_path: null
   num_samples_per_behavior: 1024
 pair:
   name: pair

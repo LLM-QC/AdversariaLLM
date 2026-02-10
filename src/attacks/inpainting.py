@@ -12,54 +12,73 @@ import logging
 import time
 from dataclasses import dataclass, field
 
+import pandas as pd
 import torch
 import transformers
-import pandas as pd
+from beartype.typing import Optional
+from huggingface_hub import hf_hub_download
 
-from .attack import (Attack, AttackResult, AttackStepResult,
-                     GenerationConfig, SingleAttackRunResult)
-from ..lm_utils import (generate_ragged_batched, get_losses_batched,
-                        prepare_conversation)
+from ..dataset import PromptDataset
+from ..lm_utils import generate_ragged_batched, get_losses_batched, prepare_conversation
 from ..types import Conversation
+from .attack import Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult
 
 
 @dataclass
 class InpaintingConfig:
     """Config for the Inpainting attack."""
+
     name: str = "inpainting"
     type: str = "discrete"
     version: str = ""
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     seed: int = 0
-    # TODO: change this before merging with main!
-    # Use offical huggingface dataset later
-    data_path: str = "/ceph/ssd/staff/dornb/data/diffusion/jbb_inpainting_limbach_0-0-1.csv"
+    custom_data_path: Optional[str] = None  # Optional custom data path
     num_samples_per_behavior: int = 1024
 
 
 class InpaintingAttack(Attack):
+    """Basic transfer attack implementation, which loads attack prompts generated with a diffusion language model via inpainting
+    with an affirmative target and queries the target model with it.
+
+    Currently only the jbb dataset is supported.
+    """
+
     def __init__(self, config: InpaintingConfig):
         super().__init__(config)
-        # basic implementation, where a dataframe of inpainting attacks is loaded and keept in memory.
-        # for every prompt of the dataset used in run, the corresponding inpainting attack is looked up
-        # and the model is prompted with the inpainted prompt.
+        # Load and sample inpainting attack data into memory for lookup during the attack run.
 
-        self.inpainting_data = pd.read_csv(config.data_path)
-        # limit to num_samples_per_behavior if specified. sample with specific seed for reproducibility
+        if config.custom_data_path is not None:
+            data_path = config.custom_data_path
+        else:
+            # Download the dataset from Hugging Face Hub if not cached.
+            data_path = hf_hub_download(
+                repo_id="davecasp/inpainting_attack_large",
+                filename="inpainting_attack.csv",
+                repo_type="dataset",
+            )
+
+        self.inpainting_data = pd.read_csv(data_path)
+        # Downsample variants per behavior; seed ensures reproducibility.
         if config.num_samples_per_behavior is not None:
-            self.inpainting_data = self.inpainting_data.groupby('original_prompt').apply(
-                lambda x: x.sample(n=min(config.num_samples_per_behavior, len(x)), random_state=config.seed),
-                include_groups=False,
-            ).reset_index(level=0)
-        assert all(self.inpainting_data['original_prompt'].value_counts() == config.num_samples_per_behavior), \
+            self.inpainting_data = (
+                self.inpainting_data.groupby("original_prompt")
+                .apply(
+                    lambda x: x.sample(n=min(config.num_samples_per_behavior, len(x)), random_state=config.seed),
+                    include_groups=False,
+                )
+                .reset_index(level=0)
+            )
+        assert all(self.inpainting_data["original_prompt"].value_counts() == config.num_samples_per_behavior), (
             "Not all behaviors have the specified number of inpainting samples after sampling."
+        )
 
     @torch.no_grad
     def run(
         self,
-        model: transformers.AutoModelForCausalLM,
-        tokenizer: transformers.AutoTokenizer,
-        dataset: torch.utils.data.Dataset,
+        model: transformers.PreTrainedModel,
+        tokenizer: transformers.PreTrainedTokenizerBase,
+        dataset: PromptDataset,
     ) -> AttackResult:
         """Run the Inpainting attack on the given dataset.
         Parameters:
@@ -83,18 +102,17 @@ class InpaintingAttack(Attack):
 
         inpainting_prompts_per_prompt = 0
         for conversation in dataset:
-
-            conversations, _ = match_inpainting_prompts(conversation, self.inpainting_data)
+            conversations = match_inpainting_prompts(conversation, self.inpainting_data)
             original_conversations.append(copy.deepcopy(conversation))
             if inpainting_prompts_per_prompt == 0:
                 inpainting_prompts_per_prompt = len(conversations)
-            assert len(conversations) == inpainting_prompts_per_prompt, \
+            assert len(conversations) == inpainting_prompts_per_prompt, (
                 "All prompts in the dataset must have the same number of inpainting variants."
+            )
 
             for conversation in conversations:
-
                 # Assuming conversation = [{'role': 'user', ...}, {'role': 'assistant', ...}]
-                assert len(conversation) == 2, "Direct attack currently assumes single-turn conversation."
+                assert len(conversation) == 2, "Inpainting attack currently assumes single-turn conversation."
                 input_conversations.append(conversation)
 
                 token_tensors = prepare_conversation(tokenizer, conversation)
@@ -132,7 +150,7 @@ class InpaintingAttack(Attack):
             # We want loss for predicting target tokens, which start at index `prompt_len`
             # The relevant loss values are at indices `prompt_len-1` to `full_len-2`
             # (inclusive start, exclusive end for slicing)
-            target_token_losses = all_losses_per_token[i][prompt_len-1:full_len-1]
+            target_token_losses = all_losses_per_token[i][prompt_len - 1 : full_len - 1]
             if target_token_losses.numel() > 0:
                 avg_loss = target_token_losses.mean().item()
             else:
@@ -177,7 +195,7 @@ class InpaintingAttack(Attack):
                 # Get token lists (convert tensors to lists of ints)
                 model_input_tokens = prompt_token_tensors_list[idx].tolist()
 
-                # Create the single step result for this direct "attack"
+                # Create the result for this inpainting attack step
                 step_result = AttackStepResult(
                     step=j,
                     model_completions=model_completions,
@@ -198,13 +216,17 @@ class InpaintingAttack(Attack):
 
             runs.append(run_result)
 
-        logging.info(f"Inpainting attack run completed. Total Time: {t1 - t0:.2f}s, "
-                     f"Generation Time: {gen_time_total:.2f}s, Loss Calc Time: {loss_time_total:.2f}s")
+        logging.info(
+            f"Inpainting attack run completed. Total Time: {t1 - t0:.2f}s, "
+            f"Generation Time: {gen_time_total:.2f}s, Loss Calc Time: {loss_time_total:.2f}s"
+        )
 
         return AttackResult(runs=runs)
 
 
-def match_inpainting_prompts(conversation: Conversation, inpainting_data: pd.DataFrame) -> tuple[list[Conversation], str]:
+def match_inpainting_prompts(
+    conversation: Conversation, inpainting_data: pd.DataFrame
+) -> list[Conversation]:
     """Matches the conversation prompt with inpainting data and returns multiple modified conversations.
 
     Parameters:
@@ -214,18 +236,20 @@ def match_inpainting_prompts(conversation: Conversation, inpainting_data: pd.Dat
 
     Returns:
     -------
-        tuple: List of modified conversations with inpainted prompts, and the original prompt.
+        list: List of modified conversations with inpainted prompts.
     """
     original_prompt = conversation[0]["content"]
     # Find all matching inpainting entries
-    matched_rows = inpainting_data[inpainting_data['original_prompt'] == original_prompt]
+    matched_rows = inpainting_data[inpainting_data["original_prompt"] == original_prompt]
 
     if matched_rows.empty:
         raise ValueError(f"No matching inpainting prompt found for: {original_prompt}")
 
     # Create a conversation for each inpainted prompt
-    conversations = [copy.deepcopy(conversation) for _ in range(len(matched_rows))]
-    for i, (_, row) in enumerate(matched_rows.iterrows()):
-        conversations[i][0]["content"] = row['inpainted_prompt']
+    conversations = []
+    for _, row in matched_rows.iterrows():
+        new_conv = copy.deepcopy(conversation)
+        new_conv[0]["content"] = row["inpainted_prompt"]
+        conversations.append(new_conv)
 
-    return conversations, original_prompt
+    return conversations
