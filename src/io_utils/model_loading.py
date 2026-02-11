@@ -6,6 +6,7 @@ and tokenizers with various optimizations and model-specific configurations.
 """
 
 import gc
+import logging
 from functools import lru_cache
 from pathlib import Path
 
@@ -152,6 +153,12 @@ def load_model_and_tokenizer(
 
     if model_params.chat_template is not None:
         tokenizer.chat_template = load_chat_template(model_params.chat_template)
+    else:
+        if model_params.id in ["GraySwanAI/Llama-3-8B-Instruct-RR", "LLM-LAT/robust-llama3-8b-instruct"]:
+            logging.warning(
+                "No system prompt is used. This aligns with the training setup, but is not consistent "
+                "with other llama3 models, which use a more realistic system prompt."
+            )
 
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token
