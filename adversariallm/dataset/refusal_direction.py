@@ -28,6 +28,7 @@ class RefusalDirectionDataConfig:
     seed: int = 0
     idx: list[int] | int | str | None = None
     shuffle: bool = True
+    n_samples: int | None = None
 
 
 @PromptDataset.register("refusal_direction")
@@ -36,6 +37,9 @@ class RefusalDirectionDataDataset(PromptDataset):
         super().__init__(config)
         with open(os.path.join(config.path, f"{config.type}_{config.split}.json"), "r") as f:
             self.messages = json.load(f)
+
+        if config.n_samples is not None:
+            self.messages = self.messages[:config.n_samples]
 
         self.idx, self.config_idx = self._select_idx(config, len(self.messages))
 

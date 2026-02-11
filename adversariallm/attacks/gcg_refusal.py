@@ -65,7 +65,6 @@ class GCGRefusalConfig:
     max_new_tokens: int = 256
     max_new_target_tokens: int = 64
     grow_target: bool = False
-    version: str = ""
 
 def mellowmax(t: Tensor, alpha=1.0, dim=-1):
     return (
@@ -1062,13 +1061,19 @@ def refusal_score(
     return torch.log(refusal_probs + epsilon) - torch.log(nonrefusal_probs + epsilon)
 
 
+def tokenize_batch(tokenizer, dataset, i, batch_size):
+    batch = [dataset[j] for j in range(i, min(i + batch_size, len(dataset)))]
+    batch_msgs = [m[0]["content"] if isinstance(m, list) else m for m in batch]
+    return [torch.cat(prepare_tokens(tokenizer, msg, target="", placement="prompt")[:4], dim=0) for msg in batch_msgs]
+
+
 def get_refusal_scores(model, tokenizer, instructions, refusal_toks, fwd_pre_hooks=[], fwd_hooks=[], batch_size=32):
     refusal_score_fn = partial(refusal_score, refusal_toks=refusal_toks)
 
     refusal_scores = torch.zeros(len(instructions), device=model.device)
 
     for i in range(0, len(instructions), batch_size):
-        inputs = [torch.cat(prepare_tokens(tokenizer, hd, target="", placement="prompt")[:4], dim=0) for hd in instructions[i:i+batch_size]]
+        inputs = tokenize_batch(tokenizer, instructions, i, batch_size)
 
         # Left-pad the tokens to ensure the post-tokens are aligned at the right position
         inputs = pad_sequence([inp.flip(0) for inp in inputs], batch_first=True, padding_value=tokenizer.pad_token_id).flip(1).to(model.device)
@@ -1204,7 +1209,7 @@ def select_direction(
     baseline_harmless_logits = torch.zeros((len(harmless_instructions), model.config.vocab_size), device=model.device, dtype=torch.float32)
     # we evaluate the activations around the post-instruction tokens
     for i in tqdm(range(0, len(harmless_instructions), batch_size)):
-        inputs = [torch.cat(prepare_tokens(tokenizer, hd, target="", placement="prompt")[:4], dim=0) for hd in harmless_instructions[i:i+batch_size]]
+        inputs = tokenize_batch(tokenizer, harmless_instructions, i, batch_size)
         # Left-pad the tokens to ensure the post-tokens are aligned at the right position
         inputs = pad_sequence([inp.flip(0) for inp in inputs], batch_first=True, padding_value=tokenizer.pad_token_id).flip(1).to(model.device)
         attention_mask = inputs != tokenizer.pad_token_id
@@ -1225,7 +1230,7 @@ def select_direction(
             intervention_logits = torch.zeros((len(harmless_instructions), model.config.vocab_size), device=model.device, dtype=torch.float32)
             # we evaluate the activations around the post-instruction tokens
             for i in tqdm(range(0, len(harmless_instructions), batch_size)):
-                inputs = [torch.cat(prepare_tokens(tokenizer, hd, target="", placement="prompt")[:4], dim=0) for hd in harmless_instructions[i:i+batch_size]]
+                inputs = tokenize_batch(tokenizer, harmless_instructions, i, batch_size)
                 # Left-pad the tokens to ensure the post-tokens are aligned at the right position
                 inputs = pad_sequence([inp.flip(0) for inp in inputs], batch_first=True, padding_value=tokenizer.pad_token_id).flip(1).to(model.device)
                 attention_mask = inputs != tokenizer.pad_token_id
@@ -1363,7 +1368,7 @@ def toxify(model, tokenizer, batch_size=16, from_cache=True):
         fwd_pre_hooks = [(block_modules[layer], get_mean_activations_pre_hook(layer=layer, cache=mean_activations[dataset.config.type], n_samples=n_samples, positions=positions)) for layer in range(n_layers)]
 
         for i in tqdm(range(0, len(dataset), batch_size)):
-            inputs = [torch.cat(prepare_tokens(tokenizer, hd, target="", placement="prompt")[:4], dim=0) for hd in dataset[i:i+batch_size]]
+            inputs = tokenize_batch(tokenizer, dataset, i, batch_size)
             # Left-pad the tokens to ensure the post-tokens are aligned at the right position
             inputs = pad_sequence([inp.flip(0) for inp in inputs], batch_first=True, padding_value=tokenizer.pad_token_id).flip(1).to(model.device)
             with add_hooks(module_forward_pre_hooks=fwd_pre_hooks, module_forward_hooks=[]):

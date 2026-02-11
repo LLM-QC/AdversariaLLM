@@ -221,6 +221,7 @@ gcg_refusal:
   filter_ids: True
   verbosity: WARNING
   token_selection: default
+  generate_completions: all
   max_new_target_tokens: 64
   grow_target: False
 gcg_reinforce:
