@@ -13,8 +13,13 @@ from judgezoo import Judge
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from tqdm import tqdm
 
-from src.errors import print_exceptions
-from src.io_utils import CompactJSONEncoder, get_mongodb_connection, delete_orphaned_runs, get_filtered_and_grouped_paths
+from adversariallm.errors import print_exceptions
+from adversariallm.io_utils import (
+    CompactJSONEncoder,
+    delete_orphaned_runs,
+    get_filtered_and_grouped_paths,
+    get_mongodb_connection,
+)
 
 torch.use_deterministic_algorithms(True, warn_only=True)  # determinism
 torch.backends.cuda.matmul.allow_tf32 = True

@@ -31,16 +31,23 @@ import sys
 
 import hydra
 import torch
+from judgezoo import Judge
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 from vllm import LLM, SamplingParams, TokensPrompt
 
-from src.dataset import json
-from src.errors import print_exceptions
-from src.io_utils import (CompactJSONEncoder, RunConfig, free_vram, get_filtered_and_grouped_paths,
-                          get_mongodb_connection, load_model_and_tokenizer, filter_config)
-from judgezoo import Judge
-from src.lm_utils import generate_ragged_batched
+from adversariallm.dataset import json
+from adversariallm.errors import print_exceptions
+from adversariallm.io_utils import (
+    CompactJSONEncoder,
+    RunConfig,
+    filter_config,
+    free_vram,
+    get_filtered_and_grouped_paths,
+    get_mongodb_connection,
+    load_model_and_tokenizer,
+)
+from adversariallm.lm_utils import generate_ragged_batched
 
 torch.use_deterministic_algorithms(True, warn_only=True)
 torch.backends.cuda.matmul.allow_tf32 = True

@@ -117,7 +117,6 @@ class DirectAttack(Attack):
             top_p=self.config.generation_config.top_p,
             top_k=self.config.generation_config.top_k,
             num_return_sequences=self.config.generation_config.num_return_sequences,
-            initial_batch_size=B * self.config.generation_config.num_return_sequences,
         )
         t_end_gen = time.time()
         gen_time_total = t_end_gen - t_start_gen

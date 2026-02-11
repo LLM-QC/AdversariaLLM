@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
-from src.attacks.autodan import AutoDANAttack
-from src.io_utils import load_model_and_tokenizer
+from adversariallm.attacks.autodan import AutoDANAttack
+from adversariallm.io_utils import load_model_and_tokenizer
 
 
 def test_autodan_attack():

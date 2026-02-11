@@ -8,12 +8,11 @@ import hydra
 import torch
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
+from adversariallm.attacks import Attack, AttackResult
+from adversariallm.dataset import PromptDataset
+from adversariallm.errors import print_exceptions
+from adversariallm.io_utils import RunConfig, filter_config, free_vram, load_model_and_tokenizer, log_attack
 from run_judges import run_judges
-from src.attacks import Attack, AttackResult
-from src.dataset import PromptDataset
-from src.errors import print_exceptions
-from src.io_utils import (RunConfig, filter_config, free_vram, load_model_and_tokenizer,
-                          log_attack)
 
 torch.use_deterministic_algorithms(True, warn_only=True)
 torch.backends.cuda.matmul.allow_tf32 = True

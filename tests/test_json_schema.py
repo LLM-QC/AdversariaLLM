@@ -19,8 +19,8 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
-from src.lm_utils import generate_ragged, json_filter, validate_json_strings
-from src.lm_utils.filters import _parse_json, _validate_json_string
+from adversariallm.lm_utils import generate_ragged, json_filter, validate_json_strings
+from adversariallm.lm_utils.filters import _parse_json, _validate_json_string
 
 # ═════════════════════════════════════════════════════════════════════
 #  Project paths
@@ -95,7 +95,7 @@ _model_cache: dict[str, tuple] = {}
 
 def _get_model_tok(model_id: str):
     if model_id not in _model_cache:
-        from src.io_utils import load_model_and_tokenizer
+        from adversariallm.io_utils import load_model_and_tokenizer
 
         cfg = OmegaConf.load(MODELS_YAML)[model_id]
         model, tok = load_model_and_tokenizer(cfg)
@@ -128,7 +128,7 @@ def _generate(model, tok, schema, padding_side, use_cache, prompt_suffix=""):
 
 
 def test_parse_json():
-    from src.lm_utils.filters import _parse_json
+    from adversariallm.lm_utils.filters import _parse_json
 
     assert _parse_json('prefix {"a":1} suffix')['a'] == 1
     assert _parse_json('{"b": 2, "note": "brace } in string"}')['b'] == 2
@@ -149,7 +149,7 @@ def test_parse_json():
     ],
 )
 def test_valid_samples(sample):
-    from src.lm_utils.filters import _parse_json, _validate_json
+    from adversariallm.lm_utils.filters import _parse_json, _validate_json
 
     SCHEMA = {
         "type": "object",

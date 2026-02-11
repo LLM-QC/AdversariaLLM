@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
-from src.attacks.direct import DirectAttack
-from src.io_utils import load_model_and_tokenizer
+from adversariallm.attacks.direct import DirectAttack
+from adversariallm.io_utils import load_model_and_tokenizer
 
 
 def test_direct_attack():

@@ -1,8 +1,9 @@
 import json
 from unittest.mock import patch
 
-from src.lm_utils import APITextGenerator, LocalTextGenerator, GenerationResult
 import pytest
+
+from adversariallm.lm_utils import APITextGenerator, GenerationResult, LocalTextGenerator
 from tests.test_json_schema import _get_model_tok
 
 

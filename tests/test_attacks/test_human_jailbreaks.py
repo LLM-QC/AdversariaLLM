@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
-from src.attacks.human_jailbreaks import HumanJailbreaksAttack
-from src.io_utils import load_model_and_tokenizer
+from adversariallm.attacks.human_jailbreaks import HumanJailbreaksAttack
+from adversariallm.io_utils import load_model_and_tokenizer
 
 
 def test_human_jailbreaks_attack():

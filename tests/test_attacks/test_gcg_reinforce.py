@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
-from src.attacks.gcg_reinforce import GCGReinforceAttack
-from src.io_utils import load_model_and_tokenizer
+from adversariallm.attacks.gcg_reinforce import GCGReinforceAttack
+from adversariallm.io_utils import load_model_and_tokenizer
 
 
 def test_gcg_reinforce_attack():

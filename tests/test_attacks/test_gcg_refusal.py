@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
-from src.attacks.gcg_refusal import GCGRefusalAttack
-from src.io_utils import load_model_and_tokenizer
+from adversariallm.attacks.gcg_refusal import GCGRefusalAttack
+from adversariallm.io_utils import load_model_and_tokenizer
 
 
 def test_gcg_refusal_attack():

@@ -13,8 +13,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from src.types import Conversation
-
+from ..types import Conversation
 from .prompt_dataset import PromptDataset
 
 

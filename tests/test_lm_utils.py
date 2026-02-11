@@ -9,8 +9,8 @@ import torch
 import transformers
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from src.types import Conversation
-from src.lm_utils import prepare_conversation, filter_suffix
+from adversariallm.lm_utils import filter_suffix, prepare_conversation
+from adversariallm.types import Conversation
 
 
 @pytest.fixture(autouse=True)
@@ -712,8 +712,8 @@ def test_prepare_conversation_gcg_style():
 
     tokenizer: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3.1-8B-Instruct")
 
-    from src.dataset import PromptDataset
-    from src.dataset.adv_behaviors import AdvBehaviorsConfig
+    from adversariallm.dataset import PromptDataset
+    from adversariallm.dataset.adv_behaviors import AdvBehaviorsConfig
 
     dataset_class = PromptDataset.from_name("adv_behaviors")
     dataset = dataset_class(AdvBehaviorsConfig())
@@ -724,7 +724,7 @@ def test_prepare_conversation_gcg_style():
     N_per_prompt = 10
     steps = 250
     ratios = []
-    from src.lm_utils import get_disallowed_ids
+    from adversariallm.lm_utils import get_disallowed_ids
     for prompt_idx in range(len(dataset)):
         conversation = dataset[prompt_idx]
         conversation_opt = copy.deepcopy(conversation)

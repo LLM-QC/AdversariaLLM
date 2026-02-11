@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
-from src.attacks.bon import BonAttack
-from src.io_utils import load_model_and_tokenizer
+from adversariallm.attacks.bon import BonAttack
+from adversariallm.io_utils import load_model_and_tokenizer
 
 
 def test_bon_attack():

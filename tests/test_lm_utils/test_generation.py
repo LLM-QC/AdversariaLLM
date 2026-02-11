@@ -1,13 +1,13 @@
 import random
 import string
+from typing import List, cast
 
 import pytest
 import torch
-from typing import cast, List
 
-from src.io_utils import load_model_and_tokenizer
-from src.lm_utils import generate_ragged_batched, prepare_conversation
-from src.lm_utils.utils import get_stop_token_ids
+from adversariallm.io_utils import load_model_and_tokenizer
+from adversariallm.lm_utils import generate_ragged_batched, prepare_conversation
+from adversariallm.lm_utils.utils import get_stop_token_ids
 
 
 @pytest.fixture

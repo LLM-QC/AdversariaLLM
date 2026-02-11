@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
-from src.attacks.ample_gcg import AmpleGCGAttack
-from src.io_utils import load_model_and_tokenizer
+from adversariallm.attacks.ample_gcg import AmpleGCGAttack
+from adversariallm.io_utils import load_model_and_tokenizer
 
 
 def test_ample_gcg_attack():

@@ -1,8 +1,10 @@
 import hydra
-from omegaconf import DictConfig
 import torch
-from src.io_utils import load_model_and_tokenizer
-from src.lm_utils import prepare_tokens
+from omegaconf import DictConfig
+
+from adversariallm.io_utils import load_model_and_tokenizer
+from adversariallm.lm_utils import prepare_tokens
+
 
 @hydra.main(config_path="conf/models", config_name="models")
 def main(cfg: DictConfig) -> None:

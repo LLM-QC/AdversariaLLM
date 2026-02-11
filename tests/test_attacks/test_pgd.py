@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
-from src.attacks.pgd import PGDAttack
-from src.io_utils import load_model_and_tokenizer
+from adversariallm.attacks.pgd import PGDAttack
+from adversariallm.io_utils import load_model_and_tokenizer
 
 
 def test_pgd_attack():
