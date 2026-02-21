@@ -33,6 +33,17 @@ Update the following configuration files with your environment-specific paths:
 
 ## 🚀 Quick Start
 
+### Repository Root Path (`root_dir`)
+
+By default, `root_dir` is inferred from the working directory where you run the Hydra script.
+If needed, you can override it explicitly:
+
+```bash
+python run_attacks.py root_dir=/absolute/path/to/repo ...
+```
+
+If you prefer a fixed setup, you can also hard-code `root_dir` in `conf/paths.yaml`.
+
 ### Running Basic Attacks
 
 To evaluate a model with a single attack method:

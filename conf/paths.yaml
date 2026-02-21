@@ -1,0 +1,5 @@
+# Default: use the directory from which Hydra is invoked.
+# You can override this at runtime, e.g.:
+#   python run_attacks.py root_dir=/absolute/path/to/repo ...
+# If you prefer, you can also hard-code your repository path here.
+root_dir: ${oc.env:PWD}
