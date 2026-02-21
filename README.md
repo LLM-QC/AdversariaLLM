@@ -24,13 +24,6 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-## ⚙️ Configuration
-
-### Step 1: Configure Paths
-Update the following configuration files with your environment-specific paths:
-- `conf/paths.yaml` - Root directory
-
-
 ## 🚀 Quick Start
 
 ### Repository Root Path (`root_dir`)

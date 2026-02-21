@@ -42,6 +42,7 @@ from .memory import free_vram
 
 # Configuration utilities
 from .config import RunConfig, filter_config
+from .resources import packaged_conf_dir, packaged_chat_templates_dir
 
 __all__ = [
     # Model loading
@@ -76,4 +77,8 @@ __all__ = [
     # Configuration
     'RunConfig',
     'filter_config',
+
+    # Packaged resources
+    'packaged_conf_dir',
+    'packaged_chat_templates_dir',
 ]
