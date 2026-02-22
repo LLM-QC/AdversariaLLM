@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adversariallm"
+version = "0.0.1"
+description = "Toolkit for evaluating and comparing adversarial attacks on LLMs."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "transformers==4.57.1",
+    "torch==2.7.1+cu128",
+    "peft==0.14.0",
+    "lm-format-enforcer==0.10.11",
+    "accelerate>=1.10,<2",
+    "datasets>=4.2,<5",
+    "huggingface-hub>=0.35,<1",
+    "safetensors>=0.6,<1",
+    "hydra-core>=1.3,<2",
+    "hydra-submitit-launcher>=1.2,<2",
+    "omegaconf>=2.3,<3",
+    "submitit>=1.5,<2",
+    "openai>=1.79,<2",
+    "litellm==1.25.2",
+    "jailbreakbench>=1.0,<2",
+    "judgezoo>=0.1,<1",
+    "numpy>=1.26,<2",
+    "pandas>=2.2,<3",
+    "matplotlib>=3.10,<4",
+    "pymongo>=4.12,<5",
+    "tqdm>=4.67,<5",
+    "python-dotenv>=1.0,<2",
+    "json5>=0.12,<1",
+    "orjson>=3.10,<4",
+    "einops>=0.8,<1",
+    "beartype>=0.20,<1",
+    "filelock>=3.17,<4",
+  ]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["adversariallm", "adversariallm.*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.format]
+quote-style = "preserve"  # or "single" / "double"
+line-ending = "auto"      # or "lf", "crlf"
+
+[tool.pixi.workspace]
+name = "adversarial"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+
+[tool.pixi.pypi-options]
+index-url = "https://pypi.org/simple"
+extra-index-urls = ["https://download.pytorch.org/whl/cu128"]
+index-strategy = "unsafe-best-match"
+
+[tool.pixi.pypi-dependencies]
+adversariallm = { path = ".", editable = true }
+transformers = "==4.57.1"
+torch = "==2.7.1+cu128"
+peft = "==0.14.0"
+lm-format-enforcer = "==0.10.11"
+
+accelerate = ">=1.10,<2"
+datasets = ">=4.2,<5"
+huggingface-hub = ">=0.35,<1"
+safetensors = ">=0.6,<1"
+hydra-core = ">=1.3,<2"
+hydra-submitit-launcher = ">=1.2,<2"
+omegaconf = ">=2.3,<3"
+submitit = ">=1.5,<2"
+openai = ">=1.79,<2"
+litellm = "==1.25.2"
+jailbreakbench = ">=1.0,<2"
+judgezoo = ">=0.1,<1"
+numpy = ">=1.26,<2"
+pandas = ">=2.2,<3"
+matplotlib = ">=3.10,<4"
+pymongo = ">=4.12,<5"
+tqdm = ">=4.67,<5"
+pytest = ">=8.3,<9"
+python-dotenv = ">=1.0,<2"
+json5 = ">=0.12,<1"
+orjson = ">=3.10,<4"
+einops = ">=0.8,<1"
+beartype = ">=0.20,<1"
+filelock = ">=3.17,<4"
+
+[tool.pixi.tasks]
+
+[tool.pixi.dependencies]
+python = "==3.10.16"
+pip = ">=25,<26"
