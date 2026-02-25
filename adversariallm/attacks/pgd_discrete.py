@@ -530,8 +530,9 @@ class PGDDiscreteAttack(Attack):
             loss_per_sample, _ = self._calculate_continuous_loss(
                 model, perturbed_one_hots, emb_matrix, attention_mask_batch, y_batch, target_masks_batch
             )
+            mean_loss = loss_per_sample.mean()
             total_loss = loss_per_sample.sum()
-            relaxed_loss = {"mean": loss_per_sample.mean().item(), "per_sample": loss_per_sample}
+            relaxed_loss = {"mean": mean_loss.item(), "per_sample": loss_per_sample}
             total_loss.backward()
 
             # Modify gradients (before optimizer step)
