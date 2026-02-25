@@ -105,7 +105,7 @@ def test_refusal_direction_dataset():
 
     assert len(dataset) == 2
     for conv in dataset:
-        assert len(conv) == 1
+        assert len(conv) == 2
         assert _is_conversation(conv)
 
 
