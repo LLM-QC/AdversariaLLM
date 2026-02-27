@@ -8,6 +8,7 @@ and tokenizers with various optimizations and model-specific configurations.
 import gc
 import logging
 from functools import lru_cache
+from importlib.resources import files
 from pathlib import Path
 
 import torch
@@ -178,12 +179,15 @@ def load_chat_template(template_name: str) -> str:
     Returns:
         The chat template as a string.
     """
-    # Get project root by going up from current file
-    project_root = Path(__file__).parent.parent.parent
-    template_path = (
-        project_root / "chat_templates" / "chat_templates" / f"{template_name}.jinja"
+    template_path = files("adversariallm").joinpath(
+        "resources", "chat_templates", "chat_templates", f"{template_name}.jinja"
     )
-    return template_path.read_text().replace("    ", "").replace("\n", "")
+    if not template_path.is_file():
+        # Fallback for source checkouts that still load from repository root.
+        project_root = Path(__file__).parent.parent.parent
+        template_path = project_root / "chat_templates" / "chat_templates" / f"{template_name}.jinja"
+
+    return template_path.read_text(encoding="utf-8").replace("    ", "").replace("\n", "")
 
 
 @lru_cache(maxsize=None)

@@ -13,6 +13,23 @@ from adversariallm.lm_utils import filter_suffix, prepare_conversation
 from adversariallm.types import Conversation
 
 
+def load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+    # Llama-3.x HF chat templates inject a dynamic "Today Date" unless date_string is provided.
+    # These tests assert exact token IDs, so force a fixed date for reproducibility.
+    if "llama-3" in model_id.lower():
+        original_apply_chat_template = tokenizer.apply_chat_template
+
+        def _apply_chat_template_fixed_date(*args, **kwargs):
+            kwargs.setdefault("date_string", "02 Apr 2025")
+            return original_apply_chat_template(*args, **kwargs)
+
+        tokenizer.apply_chat_template = _apply_chat_template_fixed_date  # type: ignore[method-assign]
+
+    return tokenizer
+
+
 @pytest.fixture(autouse=True)
 def mock_datetime():
     transformers.utils.chat_template_utils._compile_jinja_template.strftime_now = lambda x: datetime.datetime(2025, 4, 3, 12, 30, 0).strftime(x)
@@ -21,7 +38,7 @@ def mock_datetime():
 @pytest.fixture
 def tokenizer():
     """Fixture providing a tokenizer for testing."""
-    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
+    tokenizer = load_tokenizer("meta-llama/Llama-2-7b-chat-hf")
     return tokenizer
 
 
@@ -568,7 +585,7 @@ MODELS_NO_SPACE = [
 @pytest.mark.parametrize("model_id,ground_truth", MODEL_GROUND_TRUTH.items())
 def test_prepare_conversation_ground_truth_with_both(model_id, ground_truth, basic_conversation):
     """Test conversation preparation against ground truth token sets."""
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer = load_tokenizer(model_id)
     conversation_opt = conversation_with_attack(add_spaces=model_id in MODELS_WITH_SPACE, add_prefix=True, add_suffix=True)
     tokens = prepare_conversation(tokenizer, basic_conversation, conversation_opt)
 
@@ -586,7 +603,7 @@ def test_prepare_conversation_ground_truth_with_both(model_id, ground_truth, bas
 @pytest.mark.parametrize("model_id,ground_truth", MODEL_GROUND_TRUTH.items())
 def test_prepare_conversation_ground_truth_with_suffix(model_id, ground_truth, basic_conversation):
     """Test conversation preparation against ground truth token sets."""
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer = load_tokenizer(model_id)
     conversation_opt = conversation_with_attack(add_spaces=model_id in MODELS_WITH_SPACE, add_prefix=False, add_suffix=True)
     tokens = prepare_conversation(tokenizer, basic_conversation, conversation_opt)
 
@@ -604,7 +621,7 @@ def test_prepare_conversation_ground_truth_with_suffix(model_id, ground_truth, b
 @pytest.mark.parametrize("model_id,ground_truth", MODEL_GROUND_TRUTH.items())
 def test_prepare_conversation_ground_truth_with_prefix(model_id, ground_truth, basic_conversation):
     """Test conversation preparation against ground truth token sets."""
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer = load_tokenizer(model_id)
     conversation_opt = conversation_with_attack(add_spaces=model_id in MODELS_WITH_SPACE, add_prefix=True, add_suffix=False)
     tokens = prepare_conversation(tokenizer, basic_conversation, conversation_opt)
 
@@ -622,7 +639,7 @@ def test_prepare_conversation_ground_truth_with_prefix(model_id, ground_truth, b
 @pytest.mark.parametrize("model_id,ground_truth", MODEL_GROUND_TRUTH.items())
 def test_prepare_conversation_ground_truth_with_none(model_id, ground_truth, basic_conversation):
     """Test conversation preparation against ground truth token sets."""
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer = load_tokenizer(model_id)
     conversation_opt = conversation_with_attack(add_spaces=model_id in MODELS_WITH_SPACE, add_prefix=False, add_suffix=False)
     tokens = prepare_conversation(tokenizer, basic_conversation, conversation_opt)
 
@@ -670,7 +687,7 @@ def test_prepare_conversation_performance():
     """Test the performance of prepare_conversation function."""
     # Number of conversations to process
     n_conversations = 1000
-    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3.1-8B-Instruct")
+    tokenizer = load_tokenizer("meta-llama/Meta-Llama-3.1-8B-Instruct")
 
     # Generate test conversations
     conversations, conversations_with_attack = generate_test_conversations(n_conversations)
@@ -710,7 +727,7 @@ def test_prepare_conversation_gcg_style():
                 retain_idx.append(i)
         return retain_idx
 
-    tokenizer: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3.1-8B-Instruct")
+    tokenizer: PreTrainedTokenizerBase = load_tokenizer("meta-llama/Meta-Llama-3.1-8B-Instruct")
 
     from adversariallm.dataset import PromptDataset
     from adversariallm.dataset.adv_behaviors import AdvBehaviorsConfig
