@@ -52,10 +52,6 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-Notes:
-- Both workflows are supported.
-- Pixi is an alternative environment manager and does not replace the classic `pip install -e .` workflow.
-
 ## 🚀 Quick Start
 
 ### Repository Root Path (`root_dir`)
