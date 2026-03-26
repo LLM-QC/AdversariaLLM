@@ -18,6 +18,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from .attack import Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult
 from ..dataset import PromptDataset
 from ..lm_utils import TokenMergeError, generate_ragged_batched, get_disallowed_ids, get_flops, prepare_conversation
+from ..types import Conversation
 
 _NORM_PATTERNS = (
     "input_layernorm",
@@ -151,9 +152,18 @@ class ClaudiniAttack(Attack):
 
         return result
 
-    def _build_attack_conversation(self, tokenizer: PreTrainedTokenizerBase, conversation, init_adv: str):
+    def _tokenize_with_suffix(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        conversation: Conversation,
+        suffix: str,
+    ) -> tuple[
+        Conversation,
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+    ]:
+        """Tokenize conversation with suffix, retrying with one extra space on merge errors."""
         attack_conversation = [
-            {"role": "user", "content": conversation[0]["content"] + init_adv},
+            {"role": "user", "content": conversation[0]["content"] + suffix},
             {"role": "assistant", "content": conversation[1]["content"]},
         ]
         try:
@@ -162,12 +172,32 @@ class ClaudiniAttack(Attack):
             )[0]
         except TokenMergeError:
             attack_conversation = [
-                {"role": "user", "content": conversation[0]["content"] + " " + init_adv},
+                {"role": "user", "content": conversation[0]["content"] + " " + suffix},
                 {"role": "assistant", "content": conversation[1]["content"]},
             ]
             return attack_conversation, prepare_conversation(
                 tokenizer=tokenizer, conversation=conversation, conversation_opt=attack_conversation
             )[0]
+
+    @staticmethod
+    def _estimate_step_flops(
+        model: PreTrainedModel,
+        *,
+        n_tokens_in: int,
+        n_tokens_out: int,
+        k_restarts: int,
+    ) -> int:
+        try:
+            return int(
+                get_flops(
+                    model,
+                    n_tokens_in=n_tokens_in * k_restarts,
+                    n_tokens_out=n_tokens_out * k_restarts,
+                    type="forward_and_backward",
+                )
+            )
+        except Exception:
+            return 0
 
     def _attack_single_conversation(
         self,
@@ -181,7 +211,7 @@ class ClaudiniAttack(Attack):
         start = time.time()
         init_adv = self._resolve_init_string(model, tokenizer)
 
-        _attack_conv, parts = self._build_attack_conversation(tokenizer, conversation, init_adv)
+        _, parts = self._tokenize_with_suffix(tokenizer, conversation, init_adv)
         pre, attack_prefix, prompt, attack_suffix, post, target = parts
 
         before_ids = torch.cat([pre, attack_prefix, prompt]).unsqueeze(0).to(model.device)
@@ -302,19 +332,14 @@ class ClaudiniAttack(Attack):
                     step_times.append(time.time() - step_start)
 
                     n_tokens_in = int(before_ids.size(1) + adv_len + after_ids.size(1))
-                    try:
-                        step_flops.append(
-                            int(
-                                get_flops(
-                                    model,
-                                    n_tokens_in=n_tokens_in * k_restarts,
-                                    n_tokens_out=int(target_len) * k_restarts,
-                                    type="forward_and_backward",
-                                )
-                            )
+                    step_flops.append(
+                        self._estimate_step_flops(
+                            model,
+                            n_tokens_in=n_tokens_in,
+                            n_tokens_out=int(target_len),
+                            k_restarts=k_restarts,
                         )
-                    except Exception:
-                        step_flops.append(0)
+                    )
         finally:
             self._remove_hooks(lsgm_handles)
 
@@ -332,15 +357,8 @@ class ClaudiniAttack(Attack):
             ]
             step_model_inputs.append(copy.deepcopy(conv_step))
 
-            step_prompt_conv = [
-                {"role": "user", "content": conversation[0]["content"] + suffix_str},
-                {"role": "assistant", "content": conversation[1]["content"]},
-            ]
-            try:
-                pre_i, attack_prefix_i, prompt_i, attack_suffix_i, post_i, _target_i = prepare_conversation(tokenizer, conversation, step_prompt_conv)[0]
-            except TokenMergeError:
-                step_prompt_conv[0]["content"] = conversation[0]["content"] + " " + suffix_str
-                pre_i, attack_prefix_i, prompt_i, attack_suffix_i, post_i, _target_i = prepare_conversation(tokenizer, conversation, step_prompt_conv)[0]
+            _attack_conversation_i, parts_i = self._tokenize_with_suffix(tokenizer, conversation, suffix_str)
+            pre_i, attack_prefix_i, prompt_i, attack_suffix_i, post_i, _target_i = parts_i
 
             prompt_tokens = torch.cat([pre_i, attack_prefix_i, prompt_i, attack_suffix_i, post_i]).to(model.device)
             token_prompts.append(prompt_tokens)
