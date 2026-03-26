@@ -118,6 +118,10 @@ class Attack(Generic[AttRes]):
                 from .crescendo import CrescendoAttack
 
                 return CrescendoAttack
+            case "claudini":
+                from .claudini import ClaudiniAttack
+
+                return ClaudiniAttack
             case "direct":
                 from .direct import DirectAttack
 
