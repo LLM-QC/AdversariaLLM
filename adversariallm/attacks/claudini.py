@@ -7,6 +7,7 @@ Currently supports:
 from __future__ import annotations
 
 import copy
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Literal
@@ -53,6 +54,8 @@ class ClaudiniConfig:
 
     allow_non_ascii: bool = False
     allow_special: bool = False
+    log_progress: bool = True
+    progress_log_step_interval: int = 100
 
 
 class ClaudiniAttack(Attack):
@@ -65,6 +68,7 @@ class ClaudiniAttack(Attack):
             )
 
         self.disallowed_ids: torch.Tensor | None = None
+        self.logger = logging.getLogger(__name__)
 
     def run(
         self,
@@ -249,6 +253,13 @@ class ClaudiniAttack(Attack):
         step_flops: list[int] = []
 
         try:
+            if self.config.log_progress:
+                self.logger.info(
+                    "Claudini v63 start: steps=%d restarts=%d adv_tokens=%d",
+                    self.config.num_steps,
+                    self.config.num_starts,
+                    adv_len,
+                )
             for _step in range(self.config.num_steps):
                 step_start = time.time()
                 optimizer.zero_grad(set_to_none=True)
@@ -340,6 +351,26 @@ class ClaudiniAttack(Attack):
                             k_restarts=k_restarts,
                         )
                     )
+                    should_log = (
+                        self.config.log_progress
+                        and (
+                            _step == 0
+                            or _step == self.config.num_steps - 1
+                            or (
+                                self.config.progress_log_step_interval > 0
+                                and (_step + 1) % self.config.progress_log_step_interval == 0
+                            )
+                        )
+                    )
+                    if should_log:
+                        self.logger.info(
+                            "Claudini v63 step %d/%d: best_loss=%.6f step_loss=%.6f soft_loss=%.6f",
+                            _step + 1,
+                            self.config.num_steps,
+                            global_best_loss,
+                            step_best_loss,
+                            soft_loss_val,
+                        )
         finally:
             self._remove_hooks(lsgm_handles)
 

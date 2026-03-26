@@ -409,3 +409,5 @@ claudini:
   lsgm_gamma: 0.85
   allow_non_ascii: false
   allow_special: false
+  log_progress: true
+  progress_log_step_interval: 100
