@@ -2,6 +2,8 @@
 
 Currently supports:
 - ``claude_v63``: Decoupled ADC + LSGM (ported from claudini unrolled v63)
+- ``claude_v82``: Same ADC/LSGM core as v63 with v82 defaults
+- ``claude_oss_v53`` / ``claude_v53-oss``: DPTO + MAC coarse-to-fine replacement
 """
 
 from __future__ import annotations
@@ -45,12 +47,18 @@ class ClaudiniConfig:
     init_mode: Literal["manual", "random_allowed"] = "manual"
     optim_str_init: str = "! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !"
 
-    # v63 defaults
+    # ADC-style defaults (v63/v82)
     lr: float = 10.0
     momentum: float = 0.99
     ema_alpha: float = 0.01
     num_starts: int = 6
     lsgm_gamma: float = 0.85
+    # DPTO-style defaults (oss_v53)
+    num_candidates: int = 80
+    topk_per_position: int = 300
+    dpto_temperature: float = 0.4
+    n_replace: int = 2
+    switch_fraction: float = 0.8
 
     allow_non_ascii: bool = False
     allow_special: bool = False
@@ -61,14 +69,46 @@ class ClaudiniConfig:
 class ClaudiniAttack(Attack):
     def __init__(self, config: ClaudiniConfig):
         super().__init__(config)
-        if self.config.version != "claude_v63":
+        self._normalized_version = self._normalize_version(self.config.version)
+        if self._normalized_version not in {"claude_v63", "claude_v82", "claude_oss_v53"}:
             raise ValueError(
                 f"Unsupported claudini version '{self.config.version}'. "
-                "Currently supported: ['claude_v63']"
+                "Currently supported: ['claude_v63', 'claude_v82', 'claude_oss_v53', 'claude_v53-oss']"
             )
+        self._apply_version_defaults()
 
         self.disallowed_ids: torch.Tensor | None = None
         self.logger = logging.getLogger(__name__)
+
+    @staticmethod
+    def _normalize_version(version: str) -> str:
+        aliases = {
+            "claude_v53-oss": "claude_oss_v53",
+        }
+        return aliases.get(version, version)
+
+    def _apply_version_defaults(self) -> None:
+        # Apply v82 defaults only when config is still at local v63 defaults.
+        if self._normalized_version == "claude_v82":
+            if (
+                self.config.lr == 10.0
+                and self.config.momentum == 0.99
+                and self.config.ema_alpha == 0.01
+                and self.config.num_starts == 6
+                and self.config.lsgm_gamma == 0.85
+            ):
+                self.config.lr = 12.0
+                self.config.momentum = 0.99
+                self.config.ema_alpha = 0.01
+                self.config.num_starts = 8
+                self.config.lsgm_gamma = 0.70
+
+        # Apply upstream OSS defaults only when config is still at local ADC defaults.
+        if self._normalized_version == "claude_oss_v53":
+            if self.config.momentum == 0.99:
+                self.config.momentum = 0.908
+            if self.config.allow_non_ascii is False:
+                self.config.allow_non_ascii = True
 
     def run(
         self,
@@ -204,6 +244,18 @@ class ClaudiniAttack(Attack):
             return 0
 
     def _attack_single_conversation(
+        self,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        conversation,
+    ) -> SingleAttackRunResult:
+        if self._normalized_version in {"claude_v63", "claude_v82"}:
+            return self._attack_single_conversation_adc(model, tokenizer, conversation)
+        if self._normalized_version == "claude_oss_v53":
+            return self._attack_single_conversation_oss_v53(model, tokenizer, conversation)
+        raise ValueError(f"Unsupported claudini version '{self.config.version}'")
+
+    def _attack_single_conversation_adc(
         self,
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
@@ -415,6 +467,239 @@ class ClaudiniAttack(Attack):
                     step=idx,
                     model_completions=completions[idx],
                     scores=scores,
+                    time_taken=step_times[idx],
+                    flops=step_flops[idx],
+                    loss=step_losses[idx],
+                    model_input=step_model_inputs[idx],
+                    model_input_tokens=step_model_input_tokens[idx],
+                )
+            )
+
+        return SingleAttackRunResult(
+            original_prompt=copy.deepcopy(conversation),
+            steps=steps,
+            total_time=time.time() - start,
+        )
+
+    def _compute_target_loss(
+        self,
+        model: PreTrainedModel,
+        *,
+        input_embeds: torch.Tensor,
+        target_ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        logits = model(inputs_embeds=input_embeds).logits
+        shift = input_embeds.shape[1] - target_ids.shape[1]
+        target_len = target_ids.shape[1]
+        shift_logits = logits[..., shift - 1 : shift - 1 + target_len, :].contiguous()
+        target_expanded = target_ids.expand(input_embeds.size(0), -1)
+        per_token_loss = F.cross_entropy(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            target_expanded.reshape(-1),
+            reduction="none",
+        )
+        per_instance = per_token_loss.view(input_embeds.size(0), target_len).mean(dim=1)
+        return per_instance, shift_logits
+
+    def _dpto_sample(
+        self,
+        *,
+        control_toks: torch.Tensor,
+        optim_embeds: torch.Tensor,
+        grad: torch.Tensor,
+        embed_weights: torch.Tensor,
+        n_replace: int,
+    ) -> torch.Tensor:
+        eps = 1e-12
+        l_pos = optim_embeds.shape[0]
+        device = grad.device
+
+        grad_norm = grad / (grad.norm(dim=-1, keepdim=True) + eps)
+        topk = min(self.config.topk_per_position, embed_weights.shape[0])
+        top_indices = torch.empty(l_pos, topk, device=device, dtype=torch.long)
+
+        for pos in range(l_pos):
+            dir_pos = optim_embeds[pos] - embed_weights
+            dir_norm_pos = dir_pos / (dir_pos.norm(dim=-1, keepdim=True) + eps)
+            cos_pos = grad_norm[pos] @ dir_norm_pos.T
+            if self.disallowed_ids is not None and self.disallowed_ids.numel() > 0:
+                cos_pos[self.disallowed_ids.to(device)] = -float("inf")
+            cos_pos[control_toks[pos]] = -float("inf")
+            _, top_indices[pos] = cos_pos.topk(topk)
+
+        candidate_embeds = embed_weights[top_indices]
+        candidate_dirs = optim_embeds.unsqueeze(1) - candidate_embeds
+        dot_scores = torch.einsum("ld,lkd->lk", grad, candidate_dirs)
+        probs = torch.softmax(dot_scores / max(self.config.dpto_temperature, eps), dim=1)
+
+        bsz = self.config.num_candidates
+        sampled = control_toks.repeat(bsz, 1)
+        if n_replace <= 1:
+            samples_per_pos = bsz // l_pos
+            remainder = bsz % l_pos
+            all_positions: list[int] = []
+            all_tokens: list[torch.Tensor] = []
+            for pos in range(l_pos):
+                n = samples_per_pos + (1 if pos < remainder else 0)
+                if n == 0:
+                    continue
+                token_indices = torch.multinomial(probs[pos], n, replacement=True)
+                token_ids = top_indices[pos][token_indices]
+                all_positions.extend([pos] * n)
+                all_tokens.append(token_ids)
+            positions = torch.tensor(all_positions, device=device, dtype=torch.long)
+            tokens = torch.cat(all_tokens, dim=0)
+            sampled[torch.arange(bsz, device=device), positions] = tokens
+            return sampled
+
+        for b in range(bsz):
+            pos_perm = torch.randperm(l_pos, device=device)[:n_replace]
+            for pos in pos_perm:
+                tok_idx = torch.multinomial(probs[pos], 1).item()
+                sampled[b, pos] = top_indices[pos, tok_idx]
+        return sampled
+
+    def _attack_single_conversation_oss_v53(
+        self,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        conversation,
+    ) -> SingleAttackRunResult:
+        assert len(conversation) == 2, "claudini attack currently supports two-turn conversations only"
+        assert conversation[0]["role"] == "user" and conversation[1]["role"] == "assistant"
+
+        start = time.time()
+        init_adv = self._resolve_init_string(model, tokenizer)
+        _, parts = self._tokenize_with_suffix(tokenizer, conversation, init_adv)
+        pre, attack_prefix, prompt, attack_suffix, post, target = parts
+
+        before_ids = torch.cat([pre, attack_prefix, prompt]).unsqueeze(0).to(model.device)
+        after_ids = post.unsqueeze(0).to(model.device)
+        target_ids = target.unsqueeze(0).to(model.device)
+        current_ids = attack_suffix.unsqueeze(0).to(model.device)
+        if current_ids.numel() == 0:
+            raise ValueError("claudini attack requires a non-empty suffix initialization")
+
+        embed = model.get_input_embeddings()
+        embed_weights = embed.weight.detach()
+        before_embeds = embed(before_ids).detach()
+        after_embeds = embed(after_ids).detach()
+        target_embeds = embed(target_ids).detach()
+
+        momentum_grad: torch.Tensor | None = None
+        step_suffix_ids: list[torch.Tensor] = []
+        step_losses: list[float] = []
+        step_times: list[float] = []
+        step_flops: list[int] = []
+
+        for step_num in range(self.config.num_steps):
+            step_start = time.time()
+            optim_ids = current_ids
+            one_hot = F.one_hot(optim_ids, num_classes=embed.num_embeddings).to(model.device, embed_weights.dtype)
+            optim_embeds = (one_hot @ embed_weights).detach().clone()
+            optim_embeds.requires_grad_()
+
+            input_embeds = torch.cat([before_embeds, optim_embeds, after_embeds, target_embeds], dim=1)
+            losses, _ = self._compute_target_loss(model, input_embeds=input_embeds, target_ids=target_ids)
+            loss = losses.mean()
+            grad = torch.autograd.grad(outputs=[loss], inputs=[optim_embeds])[0]
+
+            with torch.no_grad():
+                if momentum_grad is None:
+                    momentum_grad = grad.clone()
+                else:
+                    momentum_grad = self.config.momentum * momentum_grad + (1 - self.config.momentum) * grad
+
+                switch_step = int(self.config.num_steps * self.config.switch_fraction)
+                current_n_replace = 1 if step_num >= switch_step else self.config.n_replace
+                sampled_ids = self._dpto_sample(
+                    control_toks=current_ids.squeeze(0),
+                    optim_embeds=optim_embeds.squeeze(0).detach(),
+                    grad=momentum_grad.squeeze(0).detach(),
+                    embed_weights=embed_weights,
+                    n_replace=current_n_replace,
+                )
+                actual_b = sampled_ids.shape[0]
+                eval_embeds = torch.cat(
+                    [
+                        before_embeds.expand(actual_b, -1, -1),
+                        embed(sampled_ids),
+                        after_embeds.expand(actual_b, -1, -1),
+                        target_embeds.expand(actual_b, -1, -1),
+                    ],
+                    dim=1,
+                )
+                batch_losses, _ = self._compute_target_loss(model, input_embeds=eval_embeds, target_ids=target_ids)
+                best_idx = int(batch_losses.argmin().item())
+                best_loss = float(batch_losses[best_idx].item())
+                current_ids = sampled_ids[best_idx].unsqueeze(0)
+                step_suffix_ids.append(current_ids.squeeze(0).clone())
+                step_losses.append(best_loss)
+                step_times.append(time.time() - step_start)
+                n_tokens_in = int(before_ids.size(1) + current_ids.size(1) + after_ids.size(1))
+                step_flops.append(
+                    self._estimate_step_flops(
+                        model,
+                        n_tokens_in=n_tokens_in,
+                        n_tokens_out=int(target_ids.size(1)),
+                        k_restarts=max(1, 1 + actual_b),
+                    )
+                )
+                should_log = (
+                    self.config.log_progress
+                    and (
+                        step_num == 0
+                        or step_num == self.config.num_steps - 1
+                        or (
+                            self.config.progress_log_step_interval > 0
+                            and (step_num + 1) % self.config.progress_log_step_interval == 0
+                        )
+                    )
+                )
+                if should_log:
+                    self.logger.info(
+                        "Claudini oss_v53 step %d/%d: best_loss=%.6f n_replace=%d",
+                        step_num + 1,
+                        self.config.num_steps,
+                        best_loss,
+                        current_n_replace,
+                    )
+
+        token_prompts: list[torch.Tensor] = []
+        step_model_inputs = []
+        step_model_input_tokens = []
+        for suffix_ids in step_suffix_ids:
+            suffix_str = tokenizer.decode(suffix_ids.tolist(), skip_special_tokens=False)
+            conv_step = [
+                {"role": "user", "content": conversation[0]["content"] + suffix_str},
+                {"role": "assistant", "content": ""},
+            ]
+            step_model_inputs.append(copy.deepcopy(conv_step))
+            _attack_conversation_i, parts_i = self._tokenize_with_suffix(tokenizer, conversation, suffix_str)
+            pre_i, attack_prefix_i, prompt_i, attack_suffix_i, post_i, _target_i = parts_i
+            prompt_tokens = torch.cat([pre_i, attack_prefix_i, prompt_i, attack_suffix_i, post_i]).to(model.device)
+            token_prompts.append(prompt_tokens)
+            step_model_input_tokens.append(prompt_tokens.tolist())
+
+        completions = generate_ragged_batched(
+            model,
+            tokenizer,
+            token_list=token_prompts,
+            max_new_tokens=self.config.generation_config.max_new_tokens,
+            temperature=self.config.generation_config.temperature,
+            top_p=self.config.generation_config.top_p,
+            top_k=self.config.generation_config.top_k,
+            num_return_sequences=self.config.generation_config.num_return_sequences,
+            initial_batch_size=len(token_prompts),
+        )
+
+        steps: list[AttackStepResult] = []
+        for idx in range(len(step_suffix_ids)):
+            steps.append(
+                AttackStepResult(
+                    step=idx,
+                    model_completions=completions[idx],
+                    scores={},
                     time_taken=step_times[idx],
                     flops=step_flops[idx],
                     loss=step_losses[idx],

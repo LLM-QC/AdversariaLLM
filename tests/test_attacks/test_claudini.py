@@ -99,3 +99,23 @@ def test_claudini_v63_run_smoke(monkeypatch):
     assert run.steps[0].model_completions == ["mock completion"]
     assert run.steps[0].scores["claudini"]["soft_loss"]
     assert run.steps[0].loss is not None
+
+
+@pytest.mark.parametrize("version", ["claude_v82", "claude_oss_v53", "claude_v53-oss"])
+def test_claudini_other_versions_smoke(monkeypatch, version):
+    monkeypatch.setattr("adversariallm.attacks.claudini.prepare_conversation", _mock_prepare_conversation)
+    monkeypatch.setattr("adversariallm.attacks.claudini.generate_ragged_batched", _mock_generate_ragged_batched)
+
+    cfg = ClaudiniConfig(version=version, num_steps=1, num_starts=2, init_mode="manual", optim_str_init="! ! !")
+    attack = ClaudiniAttack(cfg)
+
+    model = DummyModel()
+    tokenizer = DummyTokenizer()
+    dataset = DummyDataset()
+
+    result = attack.run(model, tokenizer, dataset)
+    assert len(result.runs) == 1
+    run = result.runs[0]
+    assert len(run.steps) == 1
+    assert run.steps[0].model_completions == ["mock completion"]
+    assert run.steps[0].loss is not None
