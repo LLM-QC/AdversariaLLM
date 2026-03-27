@@ -67,7 +67,8 @@ def _mock_prepare_conversation(tokenizer, conversation, conversation_opt=None):
 
 
 def _mock_generate_ragged_batched(model, tokenizer, token_list=None, **kwargs):
-    return [["mock completion"] for _ in token_list]
+    n = kwargs.get("num_return_sequences", 1)
+    return [[f"mock completion {i}" for i in range(n)] for _ in token_list]
 
 
 def test_attack_registry_includes_claudini():
@@ -96,7 +97,7 @@ def test_claudini_v63_run_smoke(monkeypatch):
     assert len(result.runs) == 1
     run = result.runs[0]
     assert len(run.steps) == 2
-    assert run.steps[0].model_completions == ["mock completion"]
+    assert len(run.steps[0].model_completions) == 1
     assert run.steps[0].scores["claudini"]["soft_loss"]
     assert run.steps[0].loss is not None
 
@@ -117,5 +118,29 @@ def test_claudini_other_versions_smoke(monkeypatch, version):
     assert len(result.runs) == 1
     run = result.runs[0]
     assert len(run.steps) == 1
-    assert run.steps[0].model_completions == ["mock completion"]
+    assert len(run.steps[0].model_completions) == 1
     assert run.steps[0].loss is not None
+
+
+def test_claudini_last_step_sampling_override(monkeypatch):
+    monkeypatch.setattr("adversariallm.attacks.claudini.prepare_conversation", _mock_prepare_conversation)
+    monkeypatch.setattr("adversariallm.attacks.claudini.generate_ragged_batched", _mock_generate_ragged_batched)
+
+    cfg = ClaudiniConfig(
+        version="claude_v63",
+        num_steps=2,
+        num_starts=2,
+        init_mode="manual",
+        optim_str_init="! ! !",
+        last_step_num_return_sequences=5,
+    )
+    attack = ClaudiniAttack(cfg)
+
+    model = DummyModel()
+    tokenizer = DummyTokenizer()
+    dataset = DummyDataset()
+    result = attack.run(model, tokenizer, dataset)
+    run = result.runs[0]
+    assert len(run.steps) == 2
+    assert len(run.steps[0].model_completions) == 1
+    assert len(run.steps[1].model_completions) == 5

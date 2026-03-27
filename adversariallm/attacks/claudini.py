@@ -44,6 +44,9 @@ class ClaudiniConfig:
     seed: int = 0
     num_steps: int = 250
     n_tokens_adv: int = 20
+    # Optional completion-count override for the final optimization step only.
+    # If None, all steps use generation_config.num_return_sequences.
+    last_step_num_return_sequences: int | None = None
     init_mode: Literal["manual", "random_allowed"] = "manual"
     optim_str_init: str = "! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !"
 
@@ -447,17 +450,7 @@ class ClaudiniAttack(Attack):
             token_prompts.append(prompt_tokens)
             step_model_input_tokens.append(prompt_tokens.tolist())
 
-        completions = generate_ragged_batched(
-            model,
-            tokenizer,
-            token_list=token_prompts,
-            max_new_tokens=self.config.generation_config.max_new_tokens,
-            temperature=self.config.generation_config.temperature,
-            top_p=self.config.generation_config.top_p,
-            top_k=self.config.generation_config.top_k,
-            num_return_sequences=self.config.generation_config.num_return_sequences,
-            initial_batch_size=len(token_prompts),
-        )
+        completions = self._generate_step_completions(model, tokenizer, token_prompts)
 
         steps: list[AttackStepResult] = []
         for idx in range(len(step_suffix_ids)):
@@ -500,6 +493,59 @@ class ClaudiniAttack(Attack):
         )
         per_instance = per_token_loss.view(input_embeds.size(0), target_len).mean(dim=1)
         return per_instance, shift_logits
+
+    def _generate_step_completions(
+        self,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        token_prompts: list[torch.Tensor],
+    ) -> list[list[str]]:
+        base_n = self.config.generation_config.num_return_sequences
+        last_n = self.config.last_step_num_return_sequences
+        if last_n is None:
+            last_n = base_n
+
+        if last_n <= 0:
+            raise ValueError("last_step_num_return_sequences must be > 0 when set")
+
+        if len(token_prompts) <= 1 or last_n == base_n:
+            return generate_ragged_batched(
+                model,
+                tokenizer,
+                token_list=token_prompts,
+                max_new_tokens=self.config.generation_config.max_new_tokens,
+                temperature=self.config.generation_config.temperature,
+                top_p=self.config.generation_config.top_p,
+                top_k=self.config.generation_config.top_k,
+                num_return_sequences=base_n,
+                initial_batch_size=len(token_prompts),
+            )
+
+        # Generate all non-final steps with the baseline return count,
+        # then oversample only the final step.
+        prefix = generate_ragged_batched(
+            model,
+            tokenizer,
+            token_list=token_prompts[:-1],
+            max_new_tokens=self.config.generation_config.max_new_tokens,
+            temperature=self.config.generation_config.temperature,
+            top_p=self.config.generation_config.top_p,
+            top_k=self.config.generation_config.top_k,
+            num_return_sequences=base_n,
+            initial_batch_size=len(token_prompts) - 1,
+        )
+        last = generate_ragged_batched(
+            model,
+            tokenizer,
+            token_list=[token_prompts[-1]],
+            max_new_tokens=self.config.generation_config.max_new_tokens,
+            temperature=self.config.generation_config.temperature,
+            top_p=self.config.generation_config.top_p,
+            top_k=self.config.generation_config.top_k,
+            num_return_sequences=last_n,
+            initial_batch_size=1,
+        )
+        return prefix + last
 
     def _dpto_sample(
         self,
@@ -681,17 +727,7 @@ class ClaudiniAttack(Attack):
             token_prompts.append(prompt_tokens)
             step_model_input_tokens.append(prompt_tokens.tolist())
 
-        completions = generate_ragged_batched(
-            model,
-            tokenizer,
-            token_list=token_prompts,
-            max_new_tokens=self.config.generation_config.max_new_tokens,
-            temperature=self.config.generation_config.temperature,
-            top_p=self.config.generation_config.top_p,
-            top_k=self.config.generation_config.top_k,
-            num_return_sequences=self.config.generation_config.num_return_sequences,
-            initial_batch_size=len(token_prompts),
-        )
+        completions = self._generate_step_completions(model, tokenizer, token_prompts)
 
         steps: list[AttackStepResult] = []
         for idx in range(len(step_suffix_ids)):

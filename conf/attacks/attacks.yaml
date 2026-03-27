@@ -398,6 +398,7 @@ claudini:
   placement: suffix
   seed: ${attacks._default.seed}
   generation_config: ${attacks._default.generation_config}
+  last_step_num_return_sequences: null # optional override for only the final step
   num_steps: 250
   n_tokens_adv: 20
   init_mode: manual # manual or random_allowed
