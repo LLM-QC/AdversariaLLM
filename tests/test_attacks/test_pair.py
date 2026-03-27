@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+import torch
 from omegaconf import OmegaConf
 
 from adversariallm.attacks.pair import PAIRAttack
@@ -70,3 +73,71 @@ def test_pair_attack():
         import traceback
         traceback.print_exc()
         raise
+
+
+def test_pair_num_return_sequences_with_many_streams(monkeypatch):
+    class DummyDataset:
+        def __iter__(self):
+            yield [
+                {"role": "user", "content": "prompt"},
+                {"role": "assistant", "content": "target"},
+            ]
+
+    class DummyModel:
+        name_or_path = "dummy-model"
+
+    class DummyTokenizer:
+        pass
+
+    cfg = SimpleNamespace(
+        seed=0,
+        num_steps=1,
+        num_streams=4,
+        generation_config=SimpleNamespace(
+            max_new_tokens=16,
+            temperature=0.0,
+            top_p=1.0,
+            top_k=0,
+            num_return_sequences=3,
+        ),
+        attack_model=SimpleNamespace(
+            id="dummy-model",
+            max_attempts=1,
+            max_new_tokens=16,
+            temperature=1.0,
+            top_p=0.9,
+        ),
+        target_model=SimpleNamespace(
+            max_new_tokens=16,
+            temperature=0.0,
+            top_p=1.0,
+        ),
+        judge_model=SimpleNamespace(id=None),
+    )
+
+    def _mock_get_attack(self, convs_list, prompts_list):
+        return [{"improvement": "x", "prompt": f"attack-{i}"} for i in range(len(convs_list))], 0
+
+    def _mock_get_response(self, conversations):
+        n = len(conversations)
+        return [f"base-{i}" for i in range(n)], [torch.tensor([i], dtype=torch.long) for i in range(n)], 0
+
+    def _mock_score(self, prompt_list, response_list):
+        return [1 for _ in prompt_list], 0
+
+    def _mock_generate_ragged_batched(model, tokenizer, token_list, **kwargs):
+        n = len(token_list)
+        extras_per_prompt = kwargs["num_return_sequences"]
+        return [[f"extra-{i}-{j}" for j in range(extras_per_prompt)] for i in range(n)]
+
+    monkeypatch.setattr("adversariallm.attacks.pair.AttackLM.get_attack", _mock_get_attack)
+    monkeypatch.setattr("adversariallm.attacks.pair.TargetLM.get_response", _mock_get_response)
+    monkeypatch.setattr("adversariallm.attacks.pair.JudgeLM.score", _mock_score)
+    monkeypatch.setattr("adversariallm.attacks.pair.generate_ragged_batched", _mock_generate_ragged_batched)
+
+    attack = PAIRAttack(cfg)
+    result = attack.run(DummyModel(), DummyTokenizer(), DummyDataset())
+
+    assert len(result.runs) == 1
+    assert len(result.runs[0].steps) == 1
+    assert len(result.runs[0].steps[0].model_completions) == cfg.num_streams * cfg.generation_config.num_return_sequences
