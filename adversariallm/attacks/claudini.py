@@ -1,8 +1,15 @@
-"""Claudini-inspired attacks implemented in local repo attack format.
+"""Single-file implementation of Claudini-style attacks.
 
-Currently supports:
-- ``claude_v63``: Decoupled ADC + LSGM (ported from claudini unrolled v63)
-- ``claude_v82``: Same ADC/LSGM core as v63 with v82 defaults
+@misc{romovpa2026claudini,
+  title={claudini},
+  author={{romovpa}},
+  howpublished={\\url{https://github.com/romovpa/claudini}},
+  year={2026}
+}
+
+Supported variants:
+- ``claude_v63``: decoupled ADC + LSGM (ported from upstream v63 flow)
+- ``claude_v82``: v63 core with v82 defaults
 - ``claude_oss_v53`` / ``claude_v53-oss``: DPTO + MAC coarse-to-fine replacement
 """
 
@@ -18,10 +25,10 @@ import torch
 import torch.nn.functional as F
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
-from .attack import Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult
 from ..dataset import PromptDataset
 from ..lm_utils import TokenMergeError, generate_ragged_batched, get_disallowed_ids, get_flops, prepare_conversation
 from ..types import Conversation
+from .attack import Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult
 
 _NORM_PATTERNS = (
     "input_layernorm",
@@ -31,6 +38,8 @@ _NORM_PATTERNS = (
     ".ln_1",
     ".ln_2",
 )
+_VERSION_ALIASES = {"claude_v53-oss": "claude_oss_v53"}
+_SUPPORTED_VERSIONS = {"claude_v63", "claude_v82", "claude_oss_v53"}
 
 
 @dataclass
@@ -73,7 +82,7 @@ class ClaudiniAttack(Attack):
     def __init__(self, config: ClaudiniConfig):
         super().__init__(config)
         self._normalized_version = self._normalize_version(self.config.version)
-        if self._normalized_version not in {"claude_v63", "claude_v82", "claude_oss_v53"}:
+        if self._normalized_version not in _SUPPORTED_VERSIONS:
             raise ValueError(
                 f"Unsupported claudini version '{self.config.version}'. "
                 "Currently supported: ['claude_v63', 'claude_v82', 'claude_oss_v53', 'claude_v53-oss']"
@@ -85,10 +94,12 @@ class ClaudiniAttack(Attack):
 
     @staticmethod
     def _normalize_version(version: str) -> str:
-        aliases = {
-            "claude_v53-oss": "claude_oss_v53",
-        }
-        return aliases.get(version, version)
+        return _VERSION_ALIASES.get(version, version)
+
+    @staticmethod
+    def _validate_single_turn_conversation(conversation: Conversation) -> None:
+        assert len(conversation) == 2, "claudini attack currently supports two-turn conversations only"
+        assert conversation[0]["role"] == "user" and conversation[1]["role"] == "assistant"
 
     def _apply_version_defaults(self) -> None:
         # Apply v82 defaults only when config is still at local v63 defaults.
@@ -226,6 +237,34 @@ class ClaudiniAttack(Attack):
                 tokenizer=tokenizer, conversation=conversation, conversation_opt=attack_conversation
             )[0]
 
+    def _build_step_prompt_artifacts(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        conversation: Conversation,
+        step_suffix_ids: list[torch.Tensor],
+        *,
+        device: torch.device,
+    ) -> tuple[list[Conversation], list[list[int]], list[torch.Tensor]]:
+        step_model_inputs: list[Conversation] = []
+        step_model_input_tokens: list[list[int]] = []
+        token_prompts: list[torch.Tensor] = []
+
+        for suffix_ids in step_suffix_ids:
+            suffix_str = tokenizer.decode(suffix_ids.tolist(), skip_special_tokens=False)
+            conv_step: Conversation = [
+                {"role": "user", "content": conversation[0]["content"] + suffix_str},
+                {"role": "assistant", "content": ""},
+            ]
+            step_model_inputs.append(copy.deepcopy(conv_step))
+
+            _conv_step, parts = self._tokenize_with_suffix(tokenizer, conversation, suffix_str)
+            pre, attack_prefix, prompt, attack_suffix, post, _target = parts
+            prompt_tokens = torch.cat([pre, attack_prefix, prompt, attack_suffix, post]).to(device)
+            token_prompts.append(prompt_tokens)
+            step_model_input_tokens.append(prompt_tokens.tolist())
+
+        return step_model_inputs, step_model_input_tokens, token_prompts
+
     @staticmethod
     def _estimate_step_flops(
         model: PreTrainedModel,
@@ -264,8 +303,7 @@ class ClaudiniAttack(Attack):
         tokenizer: PreTrainedTokenizerBase,
         conversation,
     ) -> SingleAttackRunResult:
-        assert len(conversation) == 2, "claudini attack currently supports two-turn conversations only"
-        assert conversation[0]["role"] == "user" and conversation[1]["role"] == "assistant"
+        self._validate_single_turn_conversation(conversation)
 
         start = time.time()
         init_adv = self._resolve_init_string(model, tokenizer)
@@ -319,7 +357,9 @@ class ClaudiniAttack(Attack):
                 step_start = time.time()
                 optimizer.zero_grad(set_to_none=True)
 
-                soft_embeds = torch.matmul(soft_opt.to(torch.float32), embed.weight.detach().to(torch.float32)).to(before_embeds.dtype)
+                soft_embeds = torch.matmul(soft_opt.to(torch.float32), embed.weight.detach().to(torch.float32)).to(
+                    before_embeds.dtype
+                )
                 input_embeds = torch.cat(
                     [
                         before_embeds.expand(k_restarts, -1, -1),
@@ -358,7 +398,7 @@ class ClaudiniAttack(Attack):
                     else:
                         running_wrong += (wrong_counts - running_wrong) * self.config.ema_alpha
 
-                    sparsities = (2.0 ** running_wrong).clamp(max=vocab_size / 2)
+                    sparsities = (2.0**running_wrong).clamp(max=vocab_size / 2)
                     if self.disallowed_ids is not None and self.disallowed_ids.numel() > 0:
                         soft_opt.data[:, :, self.disallowed_ids] = -1000.0
 
@@ -406,15 +446,12 @@ class ClaudiniAttack(Attack):
                             k_restarts=k_restarts,
                         )
                     )
-                    should_log = (
-                        self.config.log_progress
-                        and (
-                            _step == 0
-                            or _step == self.config.num_steps - 1
-                            or (
-                                self.config.progress_log_step_interval > 0
-                                and (_step + 1) % self.config.progress_log_step_interval == 0
-                            )
+                    should_log = self.config.log_progress and (
+                        _step == 0
+                        or _step == self.config.num_steps - 1
+                        or (
+                            self.config.progress_log_step_interval > 0
+                            and (_step + 1) % self.config.progress_log_step_interval == 0
                         )
                     )
                     if should_log:
@@ -431,24 +468,12 @@ class ClaudiniAttack(Attack):
 
         assert global_best_ids is not None
 
-        # Build per-step conversations and model-input tokens for generation.
-        token_prompts: list[torch.Tensor] = []
-        step_model_inputs = []
-        step_model_input_tokens = []
-        for suffix_ids in step_suffix_ids:
-            suffix_str = tokenizer.decode(suffix_ids.tolist(), skip_special_tokens=False)
-            conv_step = [
-                {"role": "user", "content": conversation[0]["content"] + suffix_str},
-                {"role": "assistant", "content": ""},
-            ]
-            step_model_inputs.append(copy.deepcopy(conv_step))
-
-            _attack_conversation_i, parts_i = self._tokenize_with_suffix(tokenizer, conversation, suffix_str)
-            pre_i, attack_prefix_i, prompt_i, attack_suffix_i, post_i, _target_i = parts_i
-
-            prompt_tokens = torch.cat([pre_i, attack_prefix_i, prompt_i, attack_suffix_i, post_i]).to(model.device)
-            token_prompts.append(prompt_tokens)
-            step_model_input_tokens.append(prompt_tokens.tolist())
+        step_model_inputs, step_model_input_tokens, token_prompts = self._build_step_prompt_artifacts(
+            tokenizer,
+            conversation,
+            step_suffix_ids,
+            device=model.device,
+        )
 
         completions = self._generate_step_completions(model, tokenizer, token_prompts)
 
@@ -611,8 +636,7 @@ class ClaudiniAttack(Attack):
         tokenizer: PreTrainedTokenizerBase,
         conversation,
     ) -> SingleAttackRunResult:
-        assert len(conversation) == 2, "claudini attack currently supports two-turn conversations only"
-        assert conversation[0]["role"] == "user" and conversation[1]["role"] == "assistant"
+        self._validate_single_turn_conversation(conversation)
 
         start = time.time()
         init_adv = self._resolve_init_string(model, tokenizer)
@@ -691,15 +715,12 @@ class ClaudiniAttack(Attack):
                         k_restarts=max(1, 1 + actual_b),
                     )
                 )
-                should_log = (
-                    self.config.log_progress
-                    and (
-                        step_num == 0
-                        or step_num == self.config.num_steps - 1
-                        or (
-                            self.config.progress_log_step_interval > 0
-                            and (step_num + 1) % self.config.progress_log_step_interval == 0
-                        )
+                should_log = self.config.log_progress and (
+                    step_num == 0
+                    or step_num == self.config.num_steps - 1
+                    or (
+                        self.config.progress_log_step_interval > 0
+                        and (step_num + 1) % self.config.progress_log_step_interval == 0
                     )
                 )
                 if should_log:
@@ -711,21 +732,12 @@ class ClaudiniAttack(Attack):
                         current_n_replace,
                     )
 
-        token_prompts: list[torch.Tensor] = []
-        step_model_inputs = []
-        step_model_input_tokens = []
-        for suffix_ids in step_suffix_ids:
-            suffix_str = tokenizer.decode(suffix_ids.tolist(), skip_special_tokens=False)
-            conv_step = [
-                {"role": "user", "content": conversation[0]["content"] + suffix_str},
-                {"role": "assistant", "content": ""},
-            ]
-            step_model_inputs.append(copy.deepcopy(conv_step))
-            _attack_conversation_i, parts_i = self._tokenize_with_suffix(tokenizer, conversation, suffix_str)
-            pre_i, attack_prefix_i, prompt_i, attack_suffix_i, post_i, _target_i = parts_i
-            prompt_tokens = torch.cat([pre_i, attack_prefix_i, prompt_i, attack_suffix_i, post_i]).to(model.device)
-            token_prompts.append(prompt_tokens)
-            step_model_input_tokens.append(prompt_tokens.tolist())
+        step_model_inputs, step_model_input_tokens, token_prompts = self._build_step_prompt_artifacts(
+            tokenizer,
+            conversation,
+            step_suffix_ids,
+            device=model.device,
+        )
 
         completions = self._generate_step_completions(model, tokenizer, token_prompts)
 
