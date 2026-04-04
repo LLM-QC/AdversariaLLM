@@ -71,10 +71,10 @@ class PairConfig:
     type: str = "discrete"
     version: str = ""
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
-    num_streams: int = 1
+    num_streams: int = 30
     keep_last_num: int = 3
     seed: int = 0
-    num_steps: int = 20
+    num_steps: int = 3
     attack_model: AttackModelConfig = field(default_factory=AttackModelConfig)
     target_model: TargetModelConfig = field(default_factory=TargetModelConfig)
     judge_model: JudgeModelConfig = field(default_factory=JudgeModelConfig)
@@ -83,10 +83,6 @@ class PairConfig:
 class PAIRAttack(Attack):
     def __init__(self, config):
         super().__init__(config)
-        if self.config.num_steps < 30:
-            logging.warning(f"The PAIR paper used num_steps=30, but you have set it to {self.config.num_steps}.")
-        if self.config.num_streams < 3:
-            logging.warning(f"The PAIR paper used num_streams=3, but you have set it to {self.config.num_streams}.")
 
     def run(
         self,
