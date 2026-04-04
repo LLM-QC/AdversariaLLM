@@ -279,9 +279,9 @@ pair:
   version: 0.0.2
   seed: ${attacks._default.seed}
   generation_config: ${attacks._default.generation_config}
-  num_streams: 1
+  num_streams: 30
   keep_last_num: 3
-  num_steps: 20
+  num_steps: 3
   attack_model:
     id: lmsys/vicuna-13b-v1.5
     tokenizer_id: lmsys/vicuna-13b-v1.5
