@@ -146,6 +146,17 @@ class JailbreakR1Attack(Attack):
 
     def _mode(self) -> str:
         mode = self.config.prompt_cache_mode
+        if isinstance(mode, bool):
+            mapped = "read_write" if mode else "off"
+            logging.warning(
+                "Received boolean prompt_cache_mode=%s; interpreting as '%s'. "
+                "Please use explicit string mode: off/read/write/read_write.",
+                mode,
+                mapped,
+            )
+            mode = mapped
+        if isinstance(mode, str):
+            mode = mode.strip().lower()
         valid = {"off", "read", "write", "read_write"}
         if mode not in valid:
             raise ValueError(f"Unknown prompt_cache_mode='{mode}'. Expected one of {sorted(valid)}.")
