@@ -16,6 +16,7 @@ Implementation notes and replication details:
 """
 
 import copy
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -91,6 +92,38 @@ class JailbreakR1Attack(Attack):
     def __init__(self, config: JailbreakR1Config):
         super().__init__(config)
         self.pattern = re.compile(self.config.parse_pattern, flags=re.DOTALL)
+        self._log_generation_overrides()
+
+    def _log_generation_overrides(self) -> None:
+        # Keep defaults as configured in dataclasses; only warn when user overrides.
+        default_target = GenerationConfig()
+        default_attack = JailbreakR1AttackModelGenerationConfig()
+
+        target_overrides = []
+        for key in ("temperature", "top_p", "top_k", "max_new_tokens", "num_return_sequences"):
+            current_val = getattr(self.config.generation_config, key)
+            default_val = getattr(default_target, key)
+            if current_val != default_val:
+                target_overrides.append(f"{key}={current_val} (default={default_val})")
+        if target_overrides:
+            logging.warning(
+                "Jailbreak-R1 target generation_config override detected. "
+                "Configured values differ from defaults: %s",
+                ", ".join(target_overrides),
+            )
+
+        attack_overrides = []
+        for key in ("temperature", "top_p", "top_k", "max_new_tokens"):
+            current_val = getattr(self.config.attack_model_generation_config, key)
+            default_val = getattr(default_attack, key)
+            if current_val != default_val:
+                attack_overrides.append(f"{key}={current_val} (default={default_val})")
+        if attack_overrides:
+            logging.warning(
+                "Jailbreak-R1 attack-model generation override detected. "
+                "Configured values differ from defaults: %s",
+                ", ".join(attack_overrides),
+            )
 
     def _get_attack_model(
         self,
