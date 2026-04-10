@@ -396,8 +396,8 @@ class TargetLM:
             top_p=self.top_p,
             return_tokens=True,
         )
+        flops = get_flops(self.model, sum(len(t) for t in token_list), sum(len(o[0]) if len(o) > 0 else 0 for o in outputs_list), type="forward")
         outputs_list = [self.tokenizer.decode(o[0]) for o in outputs_list]  # only care about a single completion
-        flops = get_flops(self.model, sum(len(t) for t in token_list), sum(len(o[0]) for o in outputs_list), type="forward")
 
         return outputs_list, token_list, flops
 
@@ -456,8 +456,8 @@ class JudgeLM:
             max_new_tokens=self.max_new_tokens,
             return_tokens=True,
         )
+        flops = get_flops(self.model, sum(len(t) for t in token_list), sum(len(o[0]) if len(o) > 0 else 0 for o in outputs_list), type="forward")
         outputs_list = [self.tokenizer.decode(o[0]) for o in outputs_list]
-        flops = get_flops(self.model, sum(len(t) for t in token_list), sum(len(o[0]) for o in outputs_list), type="forward")
         # Extract scores
         scores = [self.process_output(output) for output in outputs_list]
         return scores, flops
