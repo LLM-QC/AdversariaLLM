@@ -165,46 +165,66 @@ class JailbreakR1Attack(Attack):
             return None
         return think_content, self._clean_attack_content(attack_content)
 
-    def _generate_single_attack_prompt(
+    def _prepare_attack_input_tokens(
         self,
-        attack_model: transformers.AutoModelForCausalLM,
         attack_tokenizer: transformers.AutoTokenizer,
         goal: str,
-    ) -> tuple[str, str, bool]:
+    ) -> torch.Tensor:
         prompt = JB_R1_ATTACK_PROMPT_TEMPLATE.format(goal=goal)
         messages: Conversation = [{"role": "user", "content": prompt}]
         chat = attack_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         chat_with_condition = chat + self.config.attack_condition_prefix
-
-        attack_input_tokens = attack_tokenizer(
+        return attack_tokenizer(
             chat_with_condition,
             add_special_tokens=False,
             return_token_type_ids=False,
             return_tensors="pt",
         )["input_ids"][0]
 
+    def _generate_attack_prompts_parallel(
+        self,
+        attack_model: transformers.AutoModelForCausalLM,
+        attack_tokenizer: transformers.AutoTokenizer,
+        goal: str,
+        n_steps: int,
+    ) -> list[tuple[str, str, bool]]:
+        attack_input_tokens = self._prepare_attack_input_tokens(attack_tokenizer, goal)
+        results: list[Optional[tuple[str, str, bool]]] = [None] * n_steps
+        pending = list(range(n_steps))
+
         for _ in range(self.config.parse_retries):
+            if not pending:
+                break
             out = generate_ragged_batched(
                 model=attack_model,
                 tokenizer=attack_tokenizer,
-                token_list=[attack_input_tokens],
-                initial_batch_size=1,
+                token_list=[attack_input_tokens for _ in pending],
+                initial_batch_size=len(pending),
                 max_new_tokens=self.config.attack_model_generation_config.max_new_tokens,
                 temperature=self.config.attack_model_generation_config.temperature,
                 top_p=self.config.attack_model_generation_config.top_p,
                 top_k=self.config.attack_model_generation_config.top_k,
                 num_return_sequences=1,
-            )[0][0]
-            parsed = self._extract_think_and_attack(self.config.attack_condition_prefix + out)
-            if parsed is not None:
-                think, attack = parsed
-                return think, attack, True
-            if self.config.allow_untagged_fallback:
-                fallback_attack = out.strip()
-                if fallback_attack:
-                    return self.config.fallback_token, fallback_attack, False
+            )
+            next_pending = []
+            for i, step_idx in enumerate(pending):
+                sample = out[i][0]
+                parsed = self._extract_think_and_attack(self.config.attack_condition_prefix + sample)
+                if parsed is not None:
+                    think, attack = parsed
+                    results[step_idx] = (think, attack, True)
+                    continue
+                if self.config.allow_untagged_fallback:
+                    fallback_attack = sample.strip()
+                    if fallback_attack:
+                        results[step_idx] = (self.config.fallback_token, fallback_attack, False)
+                        continue
+                next_pending.append(step_idx)
+            pending = next_pending
 
-        return self.config.fallback_token, self.config.fallback_token, False
+        for step_idx in pending:
+            results[step_idx] = (self.config.fallback_token, self.config.fallback_token, False)
+        return [res for res in results if res is not None]
 
     @torch.no_grad()
     def run(
@@ -219,15 +239,19 @@ class JailbreakR1Attack(Attack):
         for conversation in dataset:
             assert len(conversation) == 2, "Jailbreak-R1 attack currently assumes single-turn conversation."
             t0 = time.time()
-            steps = []
-            for step in range(self.config.num_steps):
-                step_t0 = time.time()
-                think, attack_prompt, parse_success = self._generate_single_attack_prompt(
-                    attack_model,
-                    attack_tokenizer,
-                    conversation[0]["content"],
-                )
+            t_attack_start = time.time()
+            attack_triplets = self._generate_attack_prompts_parallel(
+                attack_model=attack_model,
+                attack_tokenizer=attack_tokenizer,
+                goal=conversation[0]["content"],
+                n_steps=self.config.num_steps,
+            )
+            t_attack = time.time() - t_attack_start
 
+            t_prepare_start = time.time()
+            prompt_tokens_per_step = []
+            model_inputs = []
+            for think, attack_prompt, parse_success in attack_triplets:
                 adv_conversation = [
                     {"role": "user", "content": attack_prompt},
                     {"role": "assistant", "content": conversation[1]["content"]},
@@ -235,28 +259,42 @@ class JailbreakR1Attack(Attack):
                 token_tensors = prepare_conversation(tokenizer, adv_conversation)
                 flat_tokens = [tokens for turn_tokens in token_tensors for tokens in turn_tokens]
                 prompt_tokens = torch.cat(flat_tokens[:-1], dim=0)
-
-                completions = generate_ragged_batched(
-                    model,
-                    tokenizer,
-                    token_list=[prompt_tokens],
-                    initial_batch_size=1,
-                    max_new_tokens=self.config.generation_config.max_new_tokens,
-                    temperature=self.config.generation_config.temperature,
-                    top_p=self.config.generation_config.top_p,
-                    top_k=self.config.generation_config.top_k,
-                    num_return_sequences=self.config.generation_config.num_return_sequences,
-                )[0]
-
                 model_input = copy.deepcopy(adv_conversation)
                 model_input[-1]["content"] = ""
+                prompt_tokens_per_step.append(prompt_tokens)
+                model_inputs.append((think, attack_prompt, parse_success, model_input, prompt_tokens.tolist()))
+            t_prepare = time.time() - t_prepare_start
+
+            t_target_start = time.time()
+            completions_per_step = generate_ragged_batched(
+                model,
+                tokenizer,
+                token_list=prompt_tokens_per_step,
+                initial_batch_size=len(prompt_tokens_per_step),
+                max_new_tokens=self.config.generation_config.max_new_tokens,
+                temperature=self.config.generation_config.temperature,
+                top_p=self.config.generation_config.top_p,
+                top_k=self.config.generation_config.top_k,
+                num_return_sequences=self.config.generation_config.num_return_sequences,
+            )
+            t_target = time.time() - t_target_start
+
+            time_per_step = (t_attack + t_prepare + t_target) / max(1, len(model_inputs))
+            steps = []
+            for step, (
+                think,
+                attack_prompt,
+                parse_success,
+                model_input,
+                model_input_tokens,
+            ) in enumerate(model_inputs):
                 steps.append(
                     AttackStepResult(
                         step=step,
-                        model_completions=completions,
+                        model_completions=completions_per_step[step],
                         model_input=model_input,
-                        model_input_tokens=prompt_tokens.tolist(),
-                        time_taken=time.time() - step_t0,
+                        model_input_tokens=model_input_tokens,
+                        time_taken=time_per_step,
                         scores={
                             "jailbreak_r1": {
                                 "parse_success": [1.0 if parse_success else 0.0],

@@ -42,26 +42,24 @@ def test_jailbreak_r1_run_smoke(monkeypatch):
     target_model = DummyModel()
     target_tokenizer = DummyTokenizer()
 
-    # First attack generation fails parsing, second one succeeds.
-    attack_outputs = iter(
-        [
-            [["not-parseable"]],
-            [["<think>strategy</think><attack>\nAttack Prompt: crafted attack text</attack>"]],
-            [["<think>strategy2</think><attack>second attack</attack>"]],
-        ]
-    )
-    target_outputs = iter(
-        [
-            [["completion-step-0"]],
-            [["completion-step-1"]],
-        ]
-    )
+    attack_call = {"n": 0}
 
     def _mock_generate_ragged_batched(model, tokenizer, token_list, **kwargs):
-        assert len(token_list) == 1
         if model is attack_model:
-            return next(attack_outputs)
-        return next(target_outputs)
+            attack_call["n"] += 1
+            # Retry 1 for two steps: step0 fails, step1 succeeds.
+            if attack_call["n"] == 1:
+                assert len(token_list) == 2
+                return [
+                    ["not-parseable"],
+                    ["<think>strategy2</think><attack>second attack</attack>"],
+                ]
+            # Retry 2 for pending step0 only.
+            assert len(token_list) == 1
+            return [["<think>strategy</think><attack>\nAttack Prompt: crafted attack text</attack>"]]
+        # One batched target generation call for both steps.
+        assert len(token_list) == 2
+        return [["completion-step-0"], ["completion-step-1"]]
 
     def _mock_prepare_conversation(tokenizer, conversation):
         # Return one turn split into [sep, pre_attack, prompt, suf_attack, post, target]
@@ -90,6 +88,7 @@ def test_jailbreak_r1_run_smoke(monkeypatch):
     assert result.runs[0].steps[0].model_input[0]["content"] == "crafted attack text"
     assert result.runs[0].steps[0].model_completions == ["completion-step-0"]
     assert result.runs[0].steps[0].scores["jailbreak_r1"]["parse_success"] == [1.0]
+    assert result.runs[0].steps[1].model_input[0]["content"] == "second attack"
 
 
 def test_jailbreak_r1_allow_untagged_fallback(monkeypatch):

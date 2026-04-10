@@ -95,3 +95,9 @@ From upstream `jailbreak_generate.py` and dataset builders:
   - Substitute attack model = Qwen2:
     - `pixi run python run_attacks.py model=google/gemma-3-1b-it attack=jailbreak_r1 dataset=adv_behaviors datasets.adv_behaviors.idx=0 datasets.adv_behaviors.shuffle=false attacks.jailbreak_r1.num_steps=1 attacks.jailbreak_r1.parse_retries=2 generation_config.max_new_tokens=64 attacks.jailbreak_r1.attack_model.id=qwen/Qwen2-7B-Instruct attacks.jailbreak_r1.attack_model.tokenizer_id=qwen/Qwen2-7B-Instruct attacks.jailbreak_r1.attack_model.chat_template=null attacks.jailbreak_r1.attack_model.short_name=Qwen2 attacks.jailbreak_r1.attack_model.developer_name=Alibaba attacks.jailbreak_r1.attack_model_generation_config.max_new_tokens=128 classifiers=null`
 - Final practical smoke run with `allow_untagged_fallback=true` and Qwen2 attack model succeeded and produced a non-trivial generated attack prompt (`attack_prompt_length=289`) while still recording `parse_success=0.0` (strict tag parser miss).
+
+## Scalability update (2026-04-10)
+- Refactored `jailbreak_r1` to parallelize per-behavior attempts across `num_steps`:
+  - attack generation now runs in batched retry rounds over pending steps
+  - target completion generation now runs in a single batched call over all steps
+- This preserves method behavior (independent sampled attempts) while improving throughput.
