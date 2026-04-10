@@ -300,3 +300,65 @@ def test_jailbreak_r1_reads_subset_by_behavior_id(monkeypatch, tmp_path):
 
     assert len(result.runs) == 1
     assert result.runs[0].steps[0].model_input[0]["content"] == "cached-b"
+
+
+def test_jailbreak_r1_frees_attacker_vram_when_models_differ(monkeypatch, tmp_path):
+    class DummyDataset:
+        idx = torch.tensor([0], dtype=torch.long)
+
+        def __iter__(self):
+            yield [
+                {"role": "user", "content": "goal-x"},
+                {"role": "assistant", "content": "target-x"},
+            ]
+
+    class DummyModel:
+        def __init__(self, name):
+            self.name_or_path = name
+            self.device = torch.device("cpu")
+
+    class DummyTokenizer:
+        name_or_path = "dummy-tokenizer"
+
+    target_model = DummyModel("target-model")
+    attack_model = DummyModel("attack-model")
+    target_tokenizer = DummyTokenizer()
+    attack_tokenizer = DummyTokenizer()
+
+    free_calls = {"n": 0}
+    monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.free_vram", lambda: free_calls.__setitem__("n", free_calls["n"] + 1))
+    monkeypatch.setattr(
+        "adversariallm.attacks.jailbreak_r1.load_model_and_tokenizer",
+        lambda cfg: (attack_model, attack_tokenizer),
+    )
+    monkeypatch.setattr(
+        "adversariallm.attacks.jailbreak_r1.JailbreakR1Attack._generate_attack_pool_parallel",
+        lambda self, attack_model, attack_tokenizer, goals, prompts_per_behavior: [
+            [("t", "cached-ish attack", True)] for _ in goals
+        ],
+    )
+    monkeypatch.setattr(
+        "adversariallm.attacks.jailbreak_r1.prepare_conversation",
+        lambda tokenizer, conversation: [(
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([1, 2], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([3], dtype=torch.long),
+        )],
+    )
+    monkeypatch.setattr(
+        "adversariallm.attacks.jailbreak_r1.generate_ragged_batched",
+        lambda model, tokenizer, token_list, **kwargs: [["target completion"]],
+    )
+
+    cfg = JailbreakR1Config(
+        num_steps=1,
+        prompt_cache_mode="write",
+        prompt_cache_path=str(tmp_path / "cache.json"),
+    )
+    attack = JailbreakR1Attack(cfg)
+    _ = attack.run(target_model, target_tokenizer, DummyDataset())
+
+    assert free_calls["n"] == 1

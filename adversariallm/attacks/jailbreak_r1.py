@@ -29,7 +29,7 @@ import torch
 import transformers
 
 from .attack import Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult
-from ..io_utils import load_model_and_tokenizer
+from ..io_utils import free_vram, load_model_and_tokenizer
 from ..lm_utils import generate_ragged_batched, prepare_conversation
 from ..types import Conversation
 
@@ -536,6 +536,8 @@ class JailbreakR1Attack(Attack):
                 f"missing_behavior_ids={missing_behavior_ids}"
             )
 
+        attack_model: Optional[transformers.AutoModelForCausalLM] = None
+        attack_tokenizer: Optional[transformers.AutoTokenizer] = None
         if missing_indices:
             attack_model, attack_tokenizer = self._get_attack_model(model, tokenizer)
             prompts_per_behavior = (
@@ -572,6 +574,11 @@ class JailbreakR1Attack(Attack):
                     prompts_per_behavior,
                     len(missing_indices),
                 )
+        if attack_model is not None and attack_model is not model:
+            del attack_model
+            del attack_tokenizer
+            free_vram()
+            logging.info("Freed attacker model VRAM after prompt generation.")
 
         runs = []
         for conv_idx, conversation in enumerate(conversations):
