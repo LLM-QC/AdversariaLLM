@@ -101,3 +101,15 @@ From upstream `jailbreak_generate.py` and dataset builders:
   - attack generation now runs in batched retry rounds over pending steps
   - target completion generation now runs in a single batched call over all steps
 - This preserves method behavior (independent sampled attempts) while improving throughput.
+
+## Prompt cache feature (2026-04-10)
+- Added cache support to avoid attacker-model inference at scale:
+  - `prompt_cache_mode`: `off|read|write|read_write`
+  - `prompt_cache_path`: JSON file path
+  - `prompt_cache_num_steps`: prompts per behavior to store (e.g., 1024)
+  - `prompt_cache_subset_strategy`: `seeded_random|first_n` for selecting `num_steps` at runtime
+  - `prompt_cache_strict_match`: enforce fingerprint+dataset signature equality on read
+- In `read` mode, attacker model is not loaded.
+- Verified smoke path:
+  - write cache with `prompt_cache_num_steps=4`
+  - read cache with `num_steps=2` and deterministic subsetting

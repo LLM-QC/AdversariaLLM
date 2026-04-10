@@ -16,10 +16,13 @@ Implementation notes and replication details:
 """
 
 import copy
+import hashlib
+import json
 import logging
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -88,6 +91,20 @@ class JailbreakR1Config:
     attack_model_generation_config: JailbreakR1AttackModelGenerationConfig = field(
         default_factory=JailbreakR1AttackModelGenerationConfig
     )
+    # Cache generated transfer prompts to avoid repeated attacker inference at scale.
+    # - off: always generate prompts online
+    # - read: require cache and load prompts from it
+    # - write: generate prompts online and write cache
+    # - read_write: read if present, else generate+write
+    prompt_cache_mode: str = "off"
+    prompt_cache_path: Optional[str] = None
+    # Number of prompts per behavior to store in cache when writing.
+    # If null, uses num_steps.
+    prompt_cache_num_steps: Optional[int] = None
+    # How to choose num_steps prompts from a larger cached pool.
+    prompt_cache_subset_strategy: str = "seeded_random"  # seeded_random or first_n
+    # Enforce strict metadata/fingerprint matching when reading cache.
+    prompt_cache_strict_match: bool = True
 
 
 class JailbreakR1Attack(Attack):
@@ -126,6 +143,155 @@ class JailbreakR1Attack(Attack):
                 "Configured values differ from defaults: %s",
                 ", ".join(attack_overrides),
             )
+
+    def _mode(self) -> str:
+        mode = self.config.prompt_cache_mode
+        valid = {"off", "read", "write", "read_write"}
+        if mode not in valid:
+            raise ValueError(f"Unknown prompt_cache_mode='{mode}'. Expected one of {sorted(valid)}.")
+        if mode != "off" and not self.config.prompt_cache_path:
+            raise ValueError("prompt_cache_path must be set when prompt_cache_mode is not 'off'.")
+        return mode
+
+    @staticmethod
+    def _dataset_signature(conversations: list[Conversation]) -> str:
+        payload = [
+            {
+                "user": conv[0]["content"],
+                "assistant": conv[1]["content"],
+            }
+            for conv in conversations
+        ]
+        as_text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        return hashlib.sha256(as_text.encode("utf-8")).hexdigest()
+
+    def _generation_fingerprint(self) -> dict:
+        return {
+            "attack_name": self.config.name,
+            "attack_version": self.config.version,
+            "template": JB_R1_ATTACK_PROMPT_TEMPLATE,
+            "attack_condition_prefix": self.config.attack_condition_prefix,
+            "parse_pattern": self.config.parse_pattern,
+            "fallback_token": self.config.fallback_token,
+            "allow_untagged_fallback": self.config.allow_untagged_fallback,
+            "parse_retries": self.config.parse_retries,
+            "attack_model": {
+                "id": self.config.attack_model.id,
+                "tokenizer_id": self.config.attack_model.tokenizer_id,
+                "chat_template": self.config.attack_model.chat_template,
+                "dtype": self.config.attack_model.dtype,
+                "trust_remote_code": self.config.attack_model.trust_remote_code,
+            },
+            "attack_model_generation_config": {
+                "temperature": self.config.attack_model_generation_config.temperature,
+                "top_p": self.config.attack_model_generation_config.top_p,
+                "top_k": self.config.attack_model_generation_config.top_k,
+                "max_new_tokens": self.config.attack_model_generation_config.max_new_tokens,
+            },
+        }
+
+    def _build_cache_payload(
+        self,
+        conversations: list[Conversation],
+        attack_pool: list[list[tuple[str, str, bool]]],
+        prompts_per_behavior: int,
+    ) -> dict:
+        return {
+            "format_version": 1,
+            "metadata": {
+                "generation_fingerprint": self._generation_fingerprint(),
+                "generation_seed": self.config.seed,
+                "prompts_per_behavior": prompts_per_behavior,
+                "dataset_signature": self._dataset_signature(conversations),
+                "dataset_size": len(conversations),
+                "created_at_unix": time.time(),
+            },
+            "records": [
+                {
+                    "original_prompt": conv[0]["content"],
+                    "target": conv[1]["content"],
+                    "attacks": [
+                        {
+                            "think": think,
+                            "attack_prompt": attack_prompt,
+                            "parse_success": parse_success,
+                        }
+                        for think, attack_prompt, parse_success in pool
+                    ],
+                }
+                for conv, pool in zip(conversations, attack_pool)
+            ],
+        }
+
+    @staticmethod
+    def _read_json(path: str) -> dict:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+
+    @staticmethod
+    def _write_json(path: str, payload: dict) -> None:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    def _validate_loaded_cache(self, payload: dict, conversations: list[Conversation]) -> None:
+        if payload.get("format_version") != 1:
+            raise ValueError("Unsupported jailbreak_r1 cache format_version.")
+        metadata = payload.get("metadata", {})
+        records = payload.get("records", [])
+        if len(records) != len(conversations):
+            raise ValueError(
+                f"Cache record count mismatch. cache={len(records)} current_dataset={len(conversations)}"
+            )
+
+        expected_sig = self._dataset_signature(conversations)
+        cache_sig = metadata.get("dataset_signature")
+        if cache_sig != expected_sig:
+            raise ValueError("Cache dataset_signature mismatch; refusing to use prompt cache.")
+
+        if self.config.prompt_cache_strict_match:
+            cache_fingerprint = metadata.get("generation_fingerprint")
+            local_fingerprint = self._generation_fingerprint()
+            if cache_fingerprint != local_fingerprint:
+                raise ValueError("Cache generation_fingerprint mismatch; refusing to use prompt cache.")
+
+    def _load_attack_pool_from_cache(self, conversations: list[Conversation]) -> list[list[tuple[str, str, bool]]]:
+        assert self.config.prompt_cache_path is not None
+        payload = self._read_json(self.config.prompt_cache_path)
+        self._validate_loaded_cache(payload, conversations)
+        records = payload["records"]
+        out = []
+        for rec, conv in zip(records, conversations):
+            if rec["original_prompt"] != conv[0]["content"] or rec["target"] != conv[1]["content"]:
+                raise ValueError("Cache record conversation mismatch; refusing to use prompt cache.")
+            pool = []
+            for att in rec["attacks"]:
+                pool.append((att["think"], att["attack_prompt"], bool(att["parse_success"])))
+            out.append(pool)
+        return out
+
+    def _subset_pool(
+        self,
+        pool: list[tuple[str, str, bool]],
+        n: int,
+        conversation_idx: int,
+    ) -> list[tuple[str, str, bool]]:
+        if len(pool) < n:
+            raise ValueError(
+                f"Cached prompt pool has only {len(pool)} prompts but num_steps={n} requested."
+            )
+        if self.config.prompt_cache_subset_strategy == "first_n":
+            return pool[:n]
+        if self.config.prompt_cache_subset_strategy == "seeded_random":
+            g = torch.Generator()
+            g.manual_seed(int(self.config.seed) + 1_000_003 * conversation_idx)
+            idx = torch.randperm(len(pool), generator=g)[:n].tolist()
+            return [pool[i] for i in idx]
+        raise ValueError(
+            f"Unknown prompt_cache_subset_strategy='{self.config.prompt_cache_subset_strategy}'. "
+            "Expected one of ['seeded_random', 'first_n']."
+        )
 
     def _get_attack_model(
         self,
@@ -233,20 +399,56 @@ class JailbreakR1Attack(Attack):
         tokenizer: transformers.AutoTokenizer,
         dataset: torch.utils.data.Dataset,
     ) -> AttackResult:
-        attack_model, attack_tokenizer = self._get_attack_model(model, tokenizer)
+        conversations = list(dataset)
+        for conversation in conversations:
+            assert len(conversation) == 2, "Jailbreak-R1 attack currently assumes single-turn conversation."
+
+        mode = self._mode()
+        use_cache = mode in {"read", "read_write"}
+        write_cache = mode in {"write", "read_write"}
+
+        attack_pool: Optional[list[list[tuple[str, str, bool]]]] = None
+        if use_cache and self.config.prompt_cache_path is not None and Path(self.config.prompt_cache_path).exists():
+            attack_pool = self._load_attack_pool_from_cache(conversations)
+            logging.info("Loaded Jailbreak-R1 prompt cache from %s", self.config.prompt_cache_path)
+        elif mode == "read":
+            raise FileNotFoundError(f"prompt_cache_mode=read but cache file missing: {self.config.prompt_cache_path}")
+
+        if attack_pool is None:
+            attack_model, attack_tokenizer = self._get_attack_model(model, tokenizer)
+            prompts_per_behavior = (
+                self.config.prompt_cache_num_steps
+                if self.config.prompt_cache_num_steps is not None
+                else self.config.num_steps
+            )
+            if prompts_per_behavior < self.config.num_steps:
+                raise ValueError(
+                    f"prompt_cache_num_steps={prompts_per_behavior} must be >= num_steps={self.config.num_steps}"
+                )
+            attack_pool = []
+            for conversation in conversations:
+                attack_triplets = self._generate_attack_prompts_parallel(
+                    attack_model=attack_model,
+                    attack_tokenizer=attack_tokenizer,
+                    goal=conversation[0]["content"],
+                    n_steps=prompts_per_behavior,
+                )
+                attack_pool.append(attack_triplets)
+            if write_cache and self.config.prompt_cache_path is not None:
+                payload = self._build_cache_payload(conversations, attack_pool, prompts_per_behavior)
+                self._write_json(self.config.prompt_cache_path, payload)
+                logging.info(
+                    "Wrote Jailbreak-R1 prompt cache to %s (prompts_per_behavior=%d)",
+                    self.config.prompt_cache_path,
+                    prompts_per_behavior,
+                )
 
         runs = []
-        for conversation in dataset:
-            assert len(conversation) == 2, "Jailbreak-R1 attack currently assumes single-turn conversation."
+        for conv_idx, conversation in enumerate(conversations):
             t0 = time.time()
-            t_attack_start = time.time()
-            attack_triplets = self._generate_attack_prompts_parallel(
-                attack_model=attack_model,
-                attack_tokenizer=attack_tokenizer,
-                goal=conversation[0]["content"],
-                n_steps=self.config.num_steps,
-            )
-            t_attack = time.time() - t_attack_start
+            assert attack_pool is not None
+            attack_triplets = self._subset_pool(attack_pool[conv_idx], self.config.num_steps, conv_idx)
+            t_attack = 0.0
 
             t_prepare_start = time.time()
             prompt_tokens_per_step = []

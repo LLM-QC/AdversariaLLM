@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import json
 
 import torch
 
@@ -145,3 +146,80 @@ def test_jailbreak_r1_allow_untagged_fallback(monkeypatch):
 
     assert result.runs[0].steps[0].model_input[0]["content"] == "untagged generated attack prompt"
     assert result.runs[0].steps[0].scores["jailbreak_r1"]["parse_success"] == [0.0]
+
+
+def test_jailbreak_r1_reads_cache_and_skips_attacker_loading(monkeypatch, tmp_path):
+    class DummyDataset:
+        def __iter__(self):
+            yield [
+                {"role": "user", "content": "goal-1"},
+                {"role": "assistant", "content": "target-1"},
+            ]
+
+    class DummyModel:
+        name_or_path = "target-model"
+        device = torch.device("cpu")
+
+    class DummyTokenizer:
+        name_or_path = "target-tokenizer"
+
+    def _mock_prepare_conversation(tokenizer, conversation):
+        return [(
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([10, 11, 12], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([13], dtype=torch.long),
+        )]
+
+    def _mock_generate_ragged_batched(model, tokenizer, token_list, **kwargs):
+        assert len(token_list) == 1
+        return [["target completion from cache path"]]
+
+    monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.prepare_conversation", _mock_prepare_conversation)
+    monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.generate_ragged_batched", _mock_generate_ragged_batched)
+    monkeypatch.setattr(
+        "adversariallm.attacks.jailbreak_r1.load_model_and_tokenizer",
+        lambda cfg: (_ for _ in ()).throw(AssertionError("attacker model should not be loaded in cache read mode")),
+    )
+
+    cfg = JailbreakR1Config(
+        num_steps=1,
+        parse_retries=1,
+        prompt_cache_mode="read",
+        prompt_cache_subset_strategy="first_n",
+        prompt_cache_path=str(tmp_path / "jbr1_cache.json"),
+    )
+
+    cache_payload = {
+        "format_version": 1,
+        "metadata": {
+            "generation_fingerprint": JailbreakR1Attack(cfg)._generation_fingerprint(),
+            "generation_seed": 0,
+            "prompts_per_behavior": 2,
+            "dataset_signature": JailbreakR1Attack(cfg)._dataset_signature(list(DummyDataset())),
+            "dataset_size": 1,
+            "created_at_unix": 0.0,
+        },
+        "records": [
+            {
+                "original_prompt": "goal-1",
+                "target": "target-1",
+                "attacks": [
+                    {"think": "t1", "attack_prompt": "cached-attack-1", "parse_success": True},
+                    {"think": "t2", "attack_prompt": "cached-attack-2", "parse_success": False},
+                ],
+            }
+        ],
+    }
+    with open(cfg.prompt_cache_path, "w", encoding="utf-8") as f:
+        json.dump(cache_payload, f)
+
+    attack = JailbreakR1Attack(cfg)
+    result = attack.run(DummyModel(), DummyTokenizer(), DummyDataset())
+
+    assert len(result.runs) == 1
+    assert len(result.runs[0].steps) == 1
+    assert result.runs[0].steps[0].model_input[0]["content"] == "cached-attack-1"
+    assert result.runs[0].steps[0].scores["jailbreak_r1"]["parse_success"] == [1.0]

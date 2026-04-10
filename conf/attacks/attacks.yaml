@@ -278,6 +278,11 @@ jailbreak_r1:
   parse_pattern: "<think>(.*?)</think>|<attack>(.*?)</attack>"
   fallback_token: "a"
   allow_untagged_fallback: false
+  prompt_cache_mode: off # off, read, write, read_write
+  prompt_cache_path: null
+  prompt_cache_num_steps: null
+  prompt_cache_subset_strategy: seeded_random # seeded_random, first_n
+  prompt_cache_strict_match: true
   attack_model:
     id: yukiyounai/Jailbreak-R1
     tokenizer_id: yukiyounai/Jailbreak-R1
