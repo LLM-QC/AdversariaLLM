@@ -113,3 +113,6 @@ From upstream `jailbreak_generate.py` and dataset builders:
 - Verified smoke path:
   - write cache with `prompt_cache_num_steps=4`
   - read cache with `num_steps=2` and deterministic subsetting
+- Updated cache semantics to record `behavior_id` and support subset retrieval by dataset index.
+- Verified real smoke: write cache on `idx=[0,1]`, then read-only run on `idx=[1]` loaded from cache (`1/1 requested behaviors cached`).
+- Cache writes now merge/extend compatible existing files by `behavior_id` instead of replacing all records.

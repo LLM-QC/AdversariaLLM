@@ -23,7 +23,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import torch
 import transformers
@@ -193,6 +193,7 @@ class JailbreakR1Attack(Attack):
     def _build_cache_payload(
         self,
         conversations: list[Conversation],
+        behavior_ids: list[int],
         attack_pool: list[list[tuple[str, str, bool]]],
         prompts_per_behavior: int,
     ) -> dict:
@@ -202,12 +203,11 @@ class JailbreakR1Attack(Attack):
                 "generation_fingerprint": self._generation_fingerprint(),
                 "generation_seed": self.config.seed,
                 "prompts_per_behavior": prompts_per_behavior,
-                "dataset_signature": self._dataset_signature(conversations),
-                "dataset_size": len(conversations),
                 "created_at_unix": time.time(),
             },
             "records": [
                 {
+                    "behavior_id": behavior_id,
                     "original_prompt": conv[0]["content"],
                     "target": conv[1]["content"],
                     "attacks": [
@@ -219,7 +219,7 @@ class JailbreakR1Attack(Attack):
                         for think, attack_prompt, parse_success in pool
                     ],
                 }
-                for conv, pool in zip(conversations, attack_pool)
+                for behavior_id, conv, pool in zip(behavior_ids, conversations, attack_pool)
             ],
         }
 
@@ -235,41 +235,84 @@ class JailbreakR1Attack(Attack):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
 
-    def _validate_loaded_cache(self, payload: dict, conversations: list[Conversation]) -> None:
+    def _extract_behavior_ids(self, dataset: torch.utils.data.Dataset, n: int) -> list[int]:
+        raw_idx = getattr(dataset, "idx", None)
+        if raw_idx is None:
+            return list(range(n))
+        if isinstance(raw_idx, torch.Tensor):
+            ids = raw_idx.tolist()
+        else:
+            ids = list(raw_idx)
+        if len(ids) != n:
+            return list(range(n))
+        return [int(i) for i in ids]
+
+    def _validate_loaded_cache(self, payload: dict) -> None:
         if payload.get("format_version") != 1:
             raise ValueError("Unsupported jailbreak_r1 cache format_version.")
-        metadata = payload.get("metadata", {})
-        records = payload.get("records", [])
-        if len(records) != len(conversations):
-            raise ValueError(
-                f"Cache record count mismatch. cache={len(records)} current_dataset={len(conversations)}"
-            )
-
-        expected_sig = self._dataset_signature(conversations)
-        cache_sig = metadata.get("dataset_signature")
-        if cache_sig != expected_sig:
-            raise ValueError("Cache dataset_signature mismatch; refusing to use prompt cache.")
-
         if self.config.prompt_cache_strict_match:
+            metadata = payload.get("metadata", {})
             cache_fingerprint = metadata.get("generation_fingerprint")
             local_fingerprint = self._generation_fingerprint()
             if cache_fingerprint != local_fingerprint:
                 raise ValueError("Cache generation_fingerprint mismatch; refusing to use prompt cache.")
 
-    def _load_attack_pool_from_cache(self, conversations: list[Conversation]) -> list[list[tuple[str, str, bool]]]:
+    def _load_records_by_behavior_id(self) -> dict[int, dict[str, Any]]:
         assert self.config.prompt_cache_path is not None
         payload = self._read_json(self.config.prompt_cache_path)
-        self._validate_loaded_cache(payload, conversations)
+        self._validate_loaded_cache(payload)
         records = payload["records"]
-        out = []
-        for rec, conv in zip(records, conversations):
-            if rec["original_prompt"] != conv[0]["content"] or rec["target"] != conv[1]["content"]:
-                raise ValueError("Cache record conversation mismatch; refusing to use prompt cache.")
-            pool = []
-            for att in rec["attacks"]:
-                pool.append((att["think"], att["attack_prompt"], bool(att["parse_success"])))
-            out.append(pool)
-        return out
+        by_id = {}
+        for i, rec in enumerate(records):
+            behavior_id = rec.get("behavior_id", i)
+            by_id[int(behavior_id)] = rec
+        return by_id
+
+    def _record_to_pool(self, rec: dict[str, Any]) -> list[tuple[str, str, bool]]:
+        pool = []
+        for att in rec["attacks"]:
+            pool.append((att["think"], att["attack_prompt"], bool(att["parse_success"])))
+        return pool
+
+    def _merge_and_write_cache(
+        self,
+        conversations: list[Conversation],
+        behavior_ids: list[int],
+        attack_pool: list[list[tuple[str, str, bool]]],
+        prompts_per_behavior: int,
+    ) -> None:
+        assert self.config.prompt_cache_path is not None
+        new_payload = self._build_cache_payload(
+            conversations=conversations,
+            behavior_ids=behavior_ids,
+            attack_pool=attack_pool,
+            prompts_per_behavior=prompts_per_behavior,
+        )
+        path = Path(self.config.prompt_cache_path)
+        if not path.exists():
+            self._write_json(self.config.prompt_cache_path, new_payload)
+            return
+
+        existing = self._read_json(self.config.prompt_cache_path)
+        self._validate_loaded_cache(existing)
+        merged = dict(existing)
+        merged_meta = dict(existing.get("metadata", {}))
+        merged_meta["generation_fingerprint"] = new_payload["metadata"]["generation_fingerprint"]
+        merged_meta["generation_seed"] = new_payload["metadata"]["generation_seed"]
+        merged_meta["prompts_per_behavior"] = max(
+            int(existing.get("metadata", {}).get("prompts_per_behavior", 0)),
+            int(prompts_per_behavior),
+        )
+        merged_meta["created_at_unix"] = time.time()
+        merged["metadata"] = merged_meta
+
+        by_id = {}
+        for i, rec in enumerate(existing.get("records", [])):
+            by_id[int(rec.get("behavior_id", i))] = rec
+        for rec in new_payload["records"]:
+            by_id[int(rec["behavior_id"])] = rec
+        merged["records"] = [by_id[k] for k in sorted(by_id.keys())]
+        self._write_json(self.config.prompt_cache_path, merged)
 
     def _subset_pool(
         self,
@@ -455,6 +498,7 @@ class JailbreakR1Attack(Attack):
         dataset: torch.utils.data.Dataset,
     ) -> AttackResult:
         conversations = list(dataset)
+        behavior_ids = self._extract_behavior_ids(dataset, len(conversations))
         for conversation in conversations:
             assert len(conversation) == 2, "Jailbreak-R1 attack currently assumes single-turn conversation."
 
@@ -462,14 +506,37 @@ class JailbreakR1Attack(Attack):
         use_cache = mode in {"read", "read_write"}
         write_cache = mode in {"write", "read_write"}
 
-        attack_pool: Optional[list[list[tuple[str, str, bool]]]] = None
+        attack_pool: list[Optional[list[tuple[str, str, bool]]]] = [None] * len(conversations)
         if use_cache and self.config.prompt_cache_path is not None and Path(self.config.prompt_cache_path).exists():
-            attack_pool = self._load_attack_pool_from_cache(conversations)
-            logging.info("Loaded Jailbreak-R1 prompt cache from %s", self.config.prompt_cache_path)
+            by_id = self._load_records_by_behavior_id()
+            for i, (behavior_id, conv) in enumerate(zip(behavior_ids, conversations)):
+                rec = by_id.get(behavior_id)
+                if rec is None:
+                    continue
+                if rec["original_prompt"] != conv[0]["content"] or rec["target"] != conv[1]["content"]:
+                    raise ValueError(
+                        f"Cache record mismatch for behavior_id={behavior_id}; refusing to use prompt cache."
+                    )
+                attack_pool[i] = self._record_to_pool(rec)
+            cached = sum(1 for x in attack_pool if x is not None)
+            logging.info(
+                "Loaded Jailbreak-R1 prompt cache from %s (%d/%d requested behaviors cached)",
+                self.config.prompt_cache_path,
+                cached,
+                len(conversations),
+            )
         elif mode == "read":
             raise FileNotFoundError(f"prompt_cache_mode=read but cache file missing: {self.config.prompt_cache_path}")
 
-        if attack_pool is None:
+        missing_indices = [i for i, pool in enumerate(attack_pool) if pool is None]
+        if missing_indices and mode == "read":
+            missing_behavior_ids = [behavior_ids[i] for i in missing_indices]
+            raise ValueError(
+                "prompt_cache_mode=read but cache is missing requested behaviors. "
+                f"missing_behavior_ids={missing_behavior_ids}"
+            )
+
+        if missing_indices:
             attack_model, attack_tokenizer = self._get_attack_model(model, tokenizer)
             prompts_per_behavior = (
                 self.config.prompt_cache_num_steps
@@ -480,25 +547,36 @@ class JailbreakR1Attack(Attack):
                 raise ValueError(
                     f"prompt_cache_num_steps={prompts_per_behavior} must be >= num_steps={self.config.num_steps}"
                 )
-            attack_pool = self._generate_attack_pool_parallel(
+            generated_pool = self._generate_attack_pool_parallel(
                 attack_model=attack_model,
                 attack_tokenizer=attack_tokenizer,
-                goals=[conversation[0]["content"] for conversation in conversations],
+                goals=[conversations[i][0]["content"] for i in missing_indices],
                 prompts_per_behavior=prompts_per_behavior,
             )
+            for local_i, global_i in enumerate(missing_indices):
+                attack_pool[global_i] = generated_pool[local_i]
             if write_cache and self.config.prompt_cache_path is not None:
-                payload = self._build_cache_payload(conversations, attack_pool, prompts_per_behavior)
-                self._write_json(self.config.prompt_cache_path, payload)
+                convs_to_write = [conversations[i] for i in missing_indices]
+                ids_to_write = [behavior_ids[i] for i in missing_indices]
+                pool_to_write = [attack_pool[i] for i in missing_indices]
+                assert all(p is not None for p in pool_to_write)
+                self._merge_and_write_cache(
+                    conversations=convs_to_write,
+                    behavior_ids=ids_to_write,
+                    attack_pool=[p for p in pool_to_write if p is not None],
+                    prompts_per_behavior=prompts_per_behavior,
+                )
                 logging.info(
-                    "Wrote Jailbreak-R1 prompt cache to %s (prompts_per_behavior=%d)",
+                    "Updated Jailbreak-R1 prompt cache at %s (prompts_per_behavior=%d, wrote=%d)",
                     self.config.prompt_cache_path,
                     prompts_per_behavior,
+                    len(missing_indices),
                 )
 
         runs = []
         for conv_idx, conversation in enumerate(conversations):
             t0 = time.time()
-            assert attack_pool is not None
+            assert attack_pool[conv_idx] is not None
             attack_triplets = self._subset_pool(attack_pool[conv_idx], self.config.num_steps, conv_idx)
             t_attack = 0.0
 

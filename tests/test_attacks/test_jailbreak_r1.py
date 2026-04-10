@@ -223,3 +223,80 @@ def test_jailbreak_r1_reads_cache_and_skips_attacker_loading(monkeypatch, tmp_pa
     assert len(result.runs[0].steps) == 1
     assert result.runs[0].steps[0].model_input[0]["content"] == "cached-attack-1"
     assert result.runs[0].steps[0].scores["jailbreak_r1"]["parse_success"] == [1.0]
+
+
+def test_jailbreak_r1_reads_subset_by_behavior_id(monkeypatch, tmp_path):
+    class DummyDataset:
+        idx = torch.tensor([1], dtype=torch.long)
+
+        def __iter__(self):
+            yield [
+                {"role": "user", "content": "goal-b"},
+                {"role": "assistant", "content": "target-b"},
+            ]
+
+    class DummyModel:
+        name_or_path = "target-model"
+        device = torch.device("cpu")
+
+    class DummyTokenizer:
+        name_or_path = "target-tokenizer"
+
+    monkeypatch.setattr(
+        "adversariallm.attacks.jailbreak_r1.load_model_and_tokenizer",
+        lambda cfg: (_ for _ in ()).throw(AssertionError("attacker model should not be loaded in cache read mode")),
+    )
+    monkeypatch.setattr(
+        "adversariallm.attacks.jailbreak_r1.prepare_conversation",
+        lambda tokenizer, conversation: [(
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([21, 22], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([23], dtype=torch.long),
+        )],
+    )
+    monkeypatch.setattr(
+        "adversariallm.attacks.jailbreak_r1.generate_ragged_batched",
+        lambda model, tokenizer, token_list, **kwargs: [["subset completion"]],
+    )
+
+    cfg = JailbreakR1Config(
+        num_steps=1,
+        parse_retries=1,
+        prompt_cache_mode="read",
+        prompt_cache_path=str(tmp_path / "jbr1_cache_subset.json"),
+    )
+    attack_for_meta = JailbreakR1Attack(cfg)
+    cache_payload = {
+        "format_version": 1,
+        "metadata": {
+            "generation_fingerprint": attack_for_meta._generation_fingerprint(),
+            "generation_seed": 0,
+            "prompts_per_behavior": 2,
+            "created_at_unix": 0.0,
+        },
+        "records": [
+            {
+                "behavior_id": 0,
+                "original_prompt": "goal-a",
+                "target": "target-a",
+                "attacks": [{"think": "ta", "attack_prompt": "cached-a", "parse_success": True}],
+            },
+            {
+                "behavior_id": 1,
+                "original_prompt": "goal-b",
+                "target": "target-b",
+                "attacks": [{"think": "tb", "attack_prompt": "cached-b", "parse_success": True}],
+            },
+        ],
+    }
+    with open(cfg.prompt_cache_path, "w", encoding="utf-8") as f:
+        json.dump(cache_payload, f)
+
+    attack = JailbreakR1Attack(cfg)
+    result = attack.run(DummyModel(), DummyTokenizer(), DummyDataset())
+
+    assert len(result.runs) == 1
+    assert result.runs[0].steps[0].model_input[0]["content"] == "cached-b"
