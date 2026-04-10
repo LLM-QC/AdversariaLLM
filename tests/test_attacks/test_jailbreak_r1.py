@@ -90,3 +90,59 @@ def test_jailbreak_r1_run_smoke(monkeypatch):
     assert result.runs[0].steps[0].model_input[0]["content"] == "crafted attack text"
     assert result.runs[0].steps[0].model_completions == ["completion-step-0"]
     assert result.runs[0].steps[0].scores["jailbreak_r1"]["parse_success"] == [1.0]
+
+
+def test_jailbreak_r1_allow_untagged_fallback(monkeypatch):
+    class DummyDataset:
+        def __iter__(self):
+            yield [
+                {"role": "user", "content": "goal"},
+                {"role": "assistant", "content": "target"},
+            ]
+
+    class DummyModel:
+        name_or_path = "target-model"
+        device = torch.device("cpu")
+
+    class DummyTokenizer:
+        name_or_path = "target-tokenizer"
+
+        def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
+            return "prompt"
+
+        def __call__(self, text, add_special_tokens=False, return_token_type_ids=False, return_tensors="pt"):
+            return {"input_ids": torch.tensor([[1, 2, 3]], dtype=torch.long)}
+
+    attack_model = SimpleNamespace(name_or_path="attack-model", device=torch.device("cpu"))
+    attack_tokenizer = DummyTokenizer()
+    target_model = DummyModel()
+    target_tokenizer = DummyTokenizer()
+
+    def _mock_generate_ragged_batched(model, tokenizer, token_list, **kwargs):
+        if model is attack_model:
+            return [["untagged generated attack prompt"]]
+        return [["target completion"]]
+
+    def _mock_prepare_conversation(tokenizer, conversation):
+        return [(
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([10, 11], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([], dtype=torch.long),
+            torch.tensor([12], dtype=torch.long),
+        )]
+
+    monkeypatch.setattr(
+        "adversariallm.attacks.jailbreak_r1.load_model_and_tokenizer",
+        lambda cfg: (attack_model, attack_tokenizer),
+    )
+    monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.generate_ragged_batched", _mock_generate_ragged_batched)
+    monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.prepare_conversation", _mock_prepare_conversation)
+
+    cfg = JailbreakR1Config(num_steps=1, parse_retries=1, allow_untagged_fallback=True)
+    attack = JailbreakR1Attack(cfg)
+    result = attack.run(target_model, target_tokenizer, DummyDataset())
+
+    assert result.runs[0].steps[0].model_input[0]["content"] == "untagged generated attack prompt"
+    assert result.runs[0].steps[0].scores["jailbreak_r1"]["parse_success"] == [0.0]

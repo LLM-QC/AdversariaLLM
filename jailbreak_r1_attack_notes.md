@@ -65,3 +65,33 @@ From upstream `jailbreak_generate.py` and dataset builders:
 ## Work log
 - 2026-04-10: Created feature branch `feature/jailbreak-r1-benchmark` from `jonas` in worktree `.worktrees/jailbreak-r1`.
 - 2026-04-10: Mapped repo attack architecture + upstream Jailbreak-R1 inference behavior.
+
+## Runtime findings (2026-04-10)
+- Attempted strict default run with:
+  - target: `google/gemma-3-1b-it`
+  - attack model: `yukiyounai/Jailbreak-R1`
+  - Result: failed with HF gated-model 403 (`GatedRepoError`).
+- Verified end-to-end GPU execution by overriding attack model to accessible checkpoints.
+  - `attack_model.id=google/gemma-3-1b-it` (same as target): run completed and wrote `run.json`.
+  - `attack_model.id=qwen/Qwen2-7B-Instruct`: run completed and wrote `run.json`.
+- Practical caveat:
+  - With substitute (non-R1) attack models, strict upstream parser often fails to find `<think>/<attack>` tags, causing fallback prompt `"a"`.
+
+## Practical compatibility tweak
+- Added optional config flag:
+  - `allow_untagged_fallback` (default: `false`)
+- Rationale:
+  - Keep strict upstream behavior by default for faithful benchmarking.
+  - Allow local smoke runs with substitute attack models to still generate non-trivial prompts when strict tags are missing.
+
+## Command log (executed)
+- Unit/smoke tests:
+  - `pixi run pytest -q tests/test_attacks/test_jailbreak_r1.py tests/test_attacks/test_attacks.py`
+- Real runs:
+  - Strict default (expected to match paper model id):
+    - `pixi run python run_attacks.py model=google/gemma-3-1b-it attack=jailbreak_r1 dataset=adv_behaviors datasets.adv_behaviors.idx=0 datasets.adv_behaviors.shuffle=false attacks.jailbreak_r1.num_steps=2 attacks.jailbreak_r1.parse_retries=2 generation_config.max_new_tokens=64 attacks.jailbreak_r1.attack_model_generation_config.max_new_tokens=128 classifiers=null`
+  - Substitute attack model = target model:
+    - `pixi run python run_attacks.py model=google/gemma-3-1b-it attack=jailbreak_r1 dataset=adv_behaviors datasets.adv_behaviors.idx=0 datasets.adv_behaviors.shuffle=false attacks.jailbreak_r1.num_steps=2 attacks.jailbreak_r1.parse_retries=2 generation_config.max_new_tokens=64 attacks.jailbreak_r1.attack_model.id=google/gemma-3-1b-it attacks.jailbreak_r1.attack_model.tokenizer_id=google/gemma-3-1b-it attacks.jailbreak_r1.attack_model.chat_template=null attacks.jailbreak_r1.attack_model_generation_config.max_new_tokens=128 classifiers=null`
+  - Substitute attack model = Qwen2:
+    - `pixi run python run_attacks.py model=google/gemma-3-1b-it attack=jailbreak_r1 dataset=adv_behaviors datasets.adv_behaviors.idx=0 datasets.adv_behaviors.shuffle=false attacks.jailbreak_r1.num_steps=1 attacks.jailbreak_r1.parse_retries=2 generation_config.max_new_tokens=64 attacks.jailbreak_r1.attack_model.id=qwen/Qwen2-7B-Instruct attacks.jailbreak_r1.attack_model.tokenizer_id=qwen/Qwen2-7B-Instruct attacks.jailbreak_r1.attack_model.chat_template=null attacks.jailbreak_r1.attack_model.short_name=Qwen2 attacks.jailbreak_r1.attack_model.developer_name=Alibaba attacks.jailbreak_r1.attack_model_generation_config.max_new_tokens=128 classifiers=null`
+- Final practical smoke run with `allow_untagged_fallback=true` and Qwen2 attack model succeeded and produced a non-trivial generated attack prompt (`attack_prompt_length=289`) while still recording `parse_success=0.0` (strict tag parser miss).

@@ -77,6 +77,9 @@ class JailbreakR1Config:
     attack_condition_prefix: str = "<think> Sure, let's think step by step, "
     parse_pattern: str = r"<think>(.*?)</think>|<attack>(.*?)</attack>"
     fallback_token: str = "a"
+    # Optional practicality override for local smoke runs with non-R1 substitutes.
+    # Keep false to match upstream strict parsing behavior.
+    allow_untagged_fallback: bool = False
 
     attack_model: JailbreakR1AttackModelConfig = field(default_factory=JailbreakR1AttackModelConfig)
     attack_model_generation_config: JailbreakR1AttackModelGenerationConfig = field(
@@ -96,7 +99,16 @@ class JailbreakR1Attack(Attack):
     ) -> tuple[transformers.AutoModelForCausalLM, transformers.AutoTokenizer]:
         if self.config.attack_model.id == model.name_or_path:
             return model, tokenizer
-        attack_model, attack_tokenizer = load_model_and_tokenizer(self.config.attack_model)
+        try:
+            attack_model, attack_tokenizer = load_model_and_tokenizer(self.config.attack_model)
+        except OSError as exc:
+            if "gated repo" in str(exc).lower() or "restricted" in str(exc).lower():
+                raise OSError(
+                    "Could not load Jailbreak-R1 attack model (likely gated). "
+                    "Request access or override `attacks.jailbreak_r1.attack_model.id`/"
+                    "`tokenizer_id` to an accessible checkpoint for smoke tests."
+                ) from exc
+            raise
         return attack_model, attack_tokenizer
 
     def _clean_attack_content(self, attack_content: str) -> str:
@@ -152,6 +164,10 @@ class JailbreakR1Attack(Attack):
             if parsed is not None:
                 think, attack = parsed
                 return think, attack, True
+            if self.config.allow_untagged_fallback:
+                fallback_attack = out.strip()
+                if fallback_attack:
+                    return self.config.fallback_token, fallback_attack, False
 
         return self.config.fallback_token, self.config.fallback_token, False
 

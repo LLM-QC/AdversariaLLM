@@ -278,6 +278,7 @@ jailbreak_r1:
   attack_condition_prefix: "<think> Sure, let's think step by step, "
   parse_pattern: "<think>(.*?)</think>|<attack>(.*?)</attack>"
   fallback_token: "a"
+  allow_untagged_fallback: false
   attack_model:
     id: yukiyounai/Jailbreak-R1
     tokenizer_id: yukiyounai/Jailbreak-R1
