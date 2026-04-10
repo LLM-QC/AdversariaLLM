@@ -140,8 +140,12 @@ class Attack(Generic[AttRes]):
                 return HumanJailbreaksAttack
             case "inpainting":
                 from .inpainting import InpaintingAttack
-                
+
                 return InpaintingAttack
+            case "jailbreak_r1":
+                from .jailbreak_r1 import JailbreakR1Attack
+
+                return JailbreakR1Attack
             case "pair":
                 from .pair import PAIRAttack
 

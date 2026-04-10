@@ -103,6 +103,7 @@ The framework supports various adversarial attack algorithms:
 - **PGD** - Projected Gradient Descent (continuous in embedding and indicator-space, with & without discretization)
 - **Random Search** - Baseline random optimization
 - **Human Jailbreaks** - Curated human-written prompts
+- **Jailbreak-R1** - RL-trained prompt generator used as a transfer-style benchmark
 - **Direct** - Direct prompt testing without optimization
 - **BEAST** - Gradient-free discrete optimization
 - **Best-of-N** - Jailbreaking with simple string perturbations
