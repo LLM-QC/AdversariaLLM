@@ -640,7 +640,6 @@ class JailbreakR1Attack(Attack):
                                 "attack_prompt_length": [float(len(attack_prompt))],
                             }
                         },
-                        defense_metadata=[{"think": think}],
                     )
                 )
 
