@@ -126,8 +126,7 @@ class JailbreakR1Attack(Attack):
                 target_overrides.append(f"{key}={current_val} (default={default_val})")
         if target_overrides:
             logging.warning(
-                "Jailbreak-R1 target generation_config override detected. "
-                "Configured values differ from defaults: %s",
+                "Jailbreak-R1 target generation_config override detected. Configured values differ from defaults: %s",
                 ", ".join(target_overrides),
             )
 
@@ -139,8 +138,7 @@ class JailbreakR1Attack(Attack):
                 attack_overrides.append(f"{key}={current_val} (default={default_val})")
         if attack_overrides:
             logging.warning(
-                "Jailbreak-R1 attack-model generation override detected. "
-                "Configured values differ from defaults: %s",
+                "Jailbreak-R1 attack-model generation override detected. Configured values differ from defaults: %s",
                 ", ".join(attack_overrides),
             )
 
@@ -332,9 +330,7 @@ class JailbreakR1Attack(Attack):
         conversation_idx: int,
     ) -> list[tuple[str, str, bool]]:
         if len(pool) < n:
-            raise ValueError(
-                f"Cached prompt pool has only {len(pool)} prompts but num_steps={n} requested."
-            )
+            raise ValueError(f"Cached prompt pool has only {len(pool)} prompts but num_steps={n} requested.")
         if self.config.prompt_cache_subset_strategy == "first_n":
             return pool[:n]
         if self.config.prompt_cache_subset_strategy == "seeded_random":
@@ -453,19 +449,12 @@ class JailbreakR1Attack(Attack):
         goals: list[str],
         prompts_per_behavior: int,
     ) -> list[list[tuple[str, str, bool]]]:
-        attack_tokens_per_behavior = [
-            self._prepare_attack_input_tokens(attack_tokenizer, goal)
-            for goal in goals
-        ]
+        attack_tokens_per_behavior = [self._prepare_attack_input_tokens(attack_tokenizer, goal) for goal in goals]
         n_behaviors = len(goals)
         results: list[list[Optional[tuple[str, str, bool]]]] = [
             [None] * prompts_per_behavior for _ in range(n_behaviors)
         ]
-        pending = [
-            (b_idx, step_idx)
-            for b_idx in range(n_behaviors)
-            for step_idx in range(prompts_per_behavior)
-        ]
+        pending = [(b_idx, step_idx) for b_idx in range(n_behaviors) for step_idx in range(prompts_per_behavior)]
 
         for _ in range(self.config.parse_retries):
             if not pending:
