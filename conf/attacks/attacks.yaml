@@ -128,6 +128,32 @@ bon:
   word_scrambling: true
   random_capitalization: true
   ascii_perturbation: true
+claudini:
+  name: claudini
+  type: discrete
+  version: claude_oss_v53 # supported: claude_v63, claude_v82, claude_oss_v53 (alias: claude_v53-oss)
+  placement: suffix
+  seed: ${attacks._default.seed}
+  generation_config: ${attacks._default.generation_config}
+  last_step_num_return_sequences: null # optional override for only the final step
+  num_steps: 250
+  n_tokens_adv: 20
+  init_mode: manual # manual or random_allowed
+  optim_str_init: "! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !"
+  lr: 10.0
+  momentum: 0.99
+  ema_alpha: 0.01
+  num_starts: 6
+  lsgm_gamma: 0.85
+  num_candidates: 80
+  topk_per_position: 300
+  dpto_temperature: 0.4
+  n_replace: 2
+  switch_fraction: 0.8
+  allow_non_ascii: false
+  allow_special: false
+  log_progress: true
+  progress_log_step_interval: 100
 crescendo:
   name: crescendo
   type: discrete
@@ -391,29 +417,3 @@ random_search:
   candidates_per_generation: 8
   optim_str_init: "x x x x x x x x x x x x x x x x x x x x" # all tested tokenizers convert this to exactly 20 tokens
   generation_config: ${attacks._default.generation_config}
-claudini:
-  name: claudini
-  type: discrete
-  version: claude_v63 # supported: claude_v63, claude_v82, claude_oss_v53 (alias: claude_v53-oss)
-  placement: suffix
-  seed: ${attacks._default.seed}
-  generation_config: ${attacks._default.generation_config}
-  last_step_num_return_sequences: null # optional override for only the final step
-  num_steps: 250
-  n_tokens_adv: 20
-  init_mode: manual # manual or random_allowed
-  optim_str_init: "! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !"
-  lr: 10.0
-  momentum: 0.99
-  ema_alpha: 0.01
-  num_starts: 6
-  lsgm_gamma: 0.85
-  num_candidates: 80
-  topk_per_position: 300
-  dpto_temperature: 0.4
-  n_replace: 2
-  switch_fraction: 0.8
-  allow_non_ascii: false
-  allow_special: false
-  log_progress: true
-  progress_log_step_interval: 100

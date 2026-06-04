@@ -86,7 +86,7 @@ def test_claudini_v63_run_smoke(monkeypatch):
     monkeypatch.setattr("adversariallm.attacks.claudini.prepare_conversation", _mock_prepare_conversation)
     monkeypatch.setattr("adversariallm.attacks.claudini.generate_ragged_batched", _mock_generate_ragged_batched)
 
-    cfg = ClaudiniConfig(num_steps=2, num_starts=2, init_mode="manual", optim_str_init="! ! !")
+    cfg = ClaudiniConfig(version="claude_v63", num_steps=2, num_starts=2, init_mode="manual", optim_str_init="! ! !")
     attack = ClaudiniAttack(cfg)
 
     model = DummyModel()

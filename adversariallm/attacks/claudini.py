@@ -46,7 +46,7 @@ _SUPPORTED_VERSIONS = {"claude_v63", "claude_v82", "claude_oss_v53"}
 class ClaudiniConfig:
     name: str = "claudini"
     type: str = "discrete"
-    version: str = "claude_v63"
+    version: str = "claude_oss_v53"
     placement: str = "suffix"
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
 
