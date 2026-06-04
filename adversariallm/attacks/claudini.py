@@ -1,10 +1,13 @@
 """Single-file implementation of Claudini-style attacks.
 
-@misc{romovpa2026claudini,
-  title={claudini},
-  author={{romovpa}},
-  howpublished={\\url{https://github.com/romovpa/claudini}},
-  year={2026}
+@article{panfilov2026claudini,
+  title = {Claudini: Autoresearch Discovers State-of-the-Art Adversarial Attack Algorithms for LLMs},
+  author = {Alexander Panfilov and Peter Romov and Igor Shilov and Yves-Alexandre de Montjoye and Jonas Geiping and Maksym Andriushchenko},
+  journal = {arXiv preprint},
+  eprint = {2603.24511},
+  archivePrefix = {arXiv},
+  year = {2026},
+  url = {https://arxiv.org/abs/2603.24511},
 }
 
 Supported variants:
