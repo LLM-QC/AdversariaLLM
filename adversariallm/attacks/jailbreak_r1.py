@@ -144,22 +144,16 @@ class JailbreakR1Attack(Attack):
 
     def _mode(self) -> str:
         mode = self.config.prompt_cache_mode
-        if isinstance(mode, bool):
-            mapped = "read_write" if mode else "off"
-            logging.warning(
-                "Received boolean prompt_cache_mode=%s; interpreting as '%s'. "
-                "Please use explicit string mode: off/read/write/read_write.",
-                mode,
-                mapped,
+        if not isinstance(mode, str):
+            raise ValueError(
+                f"prompt_cache_mode must be a string: one of 'off', 'read', 'write', 'read_write'. Got {mode} of type {type(mode)}"
             )
-            mode = mapped
-        if isinstance(mode, str):
-            mode = mode.strip().lower()
+        mode = mode.strip().lower()
         valid = {"off", "read", "write", "read_write"}
         if mode not in valid:
             raise ValueError(f"Unknown prompt_cache_mode='{mode}'. Expected one of {sorted(valid)}.")
         if mode != "off" and not self.config.prompt_cache_path:
-            raise ValueError("prompt_cache_path must be set when prompt_cache_mode is not 'off'.")
+            raise ValueError(f"prompt_cache_path must be set when prompt_cache_mode is not 'off'. Got: {self.config.prompt_cache_path}")
         return mode
 
     @staticmethod
@@ -232,18 +226,6 @@ class JailbreakR1Attack(Attack):
             ],
         }
 
-    @staticmethod
-    def _read_json(path: str) -> dict:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-
-    @staticmethod
-    def _write_json(path: str, payload: dict) -> None:
-        p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-
     def _extract_behavior_ids(self, dataset: torch.utils.data.Dataset, n: int) -> list[int]:
         raw_idx = getattr(dataset, "idx", None)
         if raw_idx is None:
@@ -268,7 +250,8 @@ class JailbreakR1Attack(Attack):
 
     def _load_records_by_behavior_id(self) -> dict[int, dict[str, Any]]:
         assert self.config.prompt_cache_path is not None
-        payload = self._read_json(self.config.prompt_cache_path)
+        with open(self.config.prompt_cache_path, encoding="utf-8") as f:
+            payload = json.load(f)
         self._validate_loaded_cache(payload)
         records = payload["records"]
         by_id = {}
@@ -289,7 +272,7 @@ class JailbreakR1Attack(Attack):
         behavior_ids: list[int],
         attack_pool: list[list[tuple[str, str, bool]]],
         prompts_per_behavior: int,
-    ) -> None:
+        ) -> None:
         assert self.config.prompt_cache_path is not None
         new_payload = self._build_cache_payload(
             conversations=conversations,
@@ -299,10 +282,13 @@ class JailbreakR1Attack(Attack):
         )
         path = Path(self.config.prompt_cache_path)
         if not path.exists():
-            self._write_json(self.config.prompt_cache_path, new_payload)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(new_payload, f, ensure_ascii=False, indent=2)
             return
 
-        existing = self._read_json(self.config.prompt_cache_path)
+        with open(path, encoding="utf-8") as f:
+            existing = json.load(f)
         self._validate_loaded_cache(existing)
         merged = dict(existing)
         merged_meta = dict(existing.get("metadata", {}))
@@ -321,7 +307,9 @@ class JailbreakR1Attack(Attack):
         for rec in new_payload["records"]:
             by_id[int(rec["behavior_id"])] = rec
         merged["records"] = [by_id[k] for k in sorted(by_id.keys())]
-        self._write_json(self.config.prompt_cache_path, merged)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(merged, f, ensure_ascii=False, indent=2)
 
     def _subset_pool(
         self,
