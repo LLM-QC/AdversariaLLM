@@ -21,6 +21,7 @@ Supported variants:
 import copy
 import logging
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -208,6 +209,14 @@ class ClaudiniAttack(Attack):
             h.remove()
         handles.clear()
 
+    @contextmanager
+    def _lsgm_hooks(self, model: PreTrainedModel):
+        handles = self._register_lsgm_hooks(model)
+        try:
+            yield
+        finally:
+            self._remove_hooks(handles)
+
     @torch.no_grad()
     def _make_sparse_batched(self, z: torch.Tensor, sparsities: torch.Tensor) -> torch.Tensor:
         # Port of claudini unrolled v63 sparsification.
@@ -372,14 +381,13 @@ class ClaudiniAttack(Attack):
         global_best_loss = float("inf")
         global_best_ids: torch.Tensor | None = None
 
-        lsgm_handles = self._register_lsgm_hooks(model)
         step_suffix_ids: list[torch.Tensor] = []
         step_losses: list[float] = []
         step_soft_losses: list[float] = []
         step_times: list[float] = []
         step_flops: list[int] = []
 
-        try:
+        with self._lsgm_hooks(model):
             if self.config.log_progress:
                 self.logger.info(
                     "Claudini v63 start: steps=%d restarts=%d adv_tokens=%d",
@@ -497,8 +505,6 @@ class ClaudiniAttack(Attack):
                             step_best_loss,
                             soft_loss_val,
                         )
-        finally:
-            self._remove_hooks(lsgm_handles)
 
         assert global_best_ids is not None
 
