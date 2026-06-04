@@ -141,3 +141,9 @@ def test_pair_num_return_sequences_with_many_streams(monkeypatch):
     assert len(result.runs) == 1
     assert len(result.runs[0].steps) == 1
     assert len(result.runs[0].steps[0].model_completions) == cfg.num_streams * cfg.generation_config.num_return_sequences
+    assert result.runs[0].steps[0].model_completions == [
+        "base-0", "extra-0-0", "extra-0-1",
+        "base-1", "extra-1-0", "extra-1-1",
+        "base-2", "extra-2-0", "extra-2-1",
+        "base-3", "extra-3-0", "extra-3-1",
+    ]

@@ -180,9 +180,18 @@ class PAIRAttack(Attack):
                 # we already have the first completion, so we only need to generate the rest
                 num_return_sequences=self.config.generation_config.num_return_sequences-1,
             )
+            extras_by_step = [[] for _ in range(len(completions))]
             for flat_idx, new_completions in enumerate(additional_completions):
                 step_idx = flat_idx // self.config.num_streams
-                completions[step_idx].extend(new_completions)
+                extras_by_step[step_idx].append(new_completions)
+            for step_idx, per_stream_extras in enumerate(extras_by_step):
+                base_completions = completions[step_idx]
+                reordered = []
+                for stream_idx, base_completion in enumerate(base_completions):
+                    reordered.append(base_completion)
+                    if stream_idx < len(per_stream_extras):
+                        reordered.extend(per_stream_extras[stream_idx])
+                completions[step_idx] = reordered
         steps = []
         for i in range(self.config.num_steps):
             step = AttackStepResult(
