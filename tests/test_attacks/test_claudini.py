@@ -77,8 +77,8 @@ def test_attack_registry_includes_claudini():
 
 
 def test_claudini_unknown_version_rejected():
-    cfg = ClaudiniConfig(version="unknown")
-    with pytest.raises(ValueError, match="Unsupported claudini version"):
+    cfg = ClaudiniConfig(variant="unknown")
+    with pytest.raises(ValueError, match="Unsupported claudini variant"):
         ClaudiniAttack(cfg)
 
 
@@ -86,7 +86,7 @@ def test_claudini_v63_run_smoke(monkeypatch):
     monkeypatch.setattr("adversariallm.attacks.claudini.prepare_conversation", _mock_prepare_conversation)
     monkeypatch.setattr("adversariallm.attacks.claudini.generate_ragged_batched", _mock_generate_ragged_batched)
 
-    cfg = ClaudiniConfig(version="claude_v63", num_steps=2, num_starts=2, init_mode="manual", optim_str_init="! ! !")
+    cfg = ClaudiniConfig(variant="claude_v63", num_steps=2, num_starts=2, init_mode="manual", optim_str_init="! ! !")
     attack = ClaudiniAttack(cfg)
 
     model = DummyModel()
@@ -102,12 +102,12 @@ def test_claudini_v63_run_smoke(monkeypatch):
     assert run.steps[0].loss is not None
 
 
-@pytest.mark.parametrize("version", ["claude_v82", "claude_oss_v53", "claude_v53-oss"])
-def test_claudini_other_versions_smoke(monkeypatch, version):
+@pytest.mark.parametrize("variant", ["claude_v82", "claude_oss_v53", "claude_v53-oss"])
+def test_claudini_other_versions_smoke(monkeypatch, variant):
     monkeypatch.setattr("adversariallm.attacks.claudini.prepare_conversation", _mock_prepare_conversation)
     monkeypatch.setattr("adversariallm.attacks.claudini.generate_ragged_batched", _mock_generate_ragged_batched)
 
-    cfg = ClaudiniConfig(version=version, num_steps=1, num_starts=2, init_mode="manual", optim_str_init="! ! !")
+    cfg = ClaudiniConfig(variant=variant, num_steps=1, num_starts=2, init_mode="manual", optim_str_init="! ! !")
     attack = ClaudiniAttack(cfg)
 
     model = DummyModel()
@@ -127,7 +127,7 @@ def test_claudini_last_step_sampling_override(monkeypatch):
     monkeypatch.setattr("adversariallm.attacks.claudini.generate_ragged_batched", _mock_generate_ragged_batched)
 
     cfg = ClaudiniConfig(
-        version="claude_v63",
+        variant="claude_v63",
         num_steps=2,
         num_starts=2,
         init_mode="manual",
@@ -144,3 +144,10 @@ def test_claudini_last_step_sampling_override(monkeypatch):
     assert len(run.steps) == 2
     assert len(run.steps[0].model_completions) == 1
     assert len(run.steps[1].model_completions) == 5
+
+
+def test_claudini_legacy_version_override_maps_to_variant():
+    cfg = ClaudiniConfig(version="claude_v82")
+    attack = ClaudiniAttack(cfg)
+    assert attack.config.version == "0.0.1"
+    assert attack.config.variant == "claude_v82"

@@ -38,15 +38,16 @@ _NORM_PATTERNS = (
     ".ln_1",
     ".ln_2",
 )
-_VERSION_ALIASES = {"claude_v53-oss": "claude_oss_v53"}
-_SUPPORTED_VERSIONS = {"claude_v63", "claude_v82", "claude_oss_v53"}
+_VARIANT_ALIASES = {"claude_v53-oss": "claude_oss_v53"}
+_SUPPORTED_VARIANTS = {"claude_v63", "claude_v82", "claude_oss_v53"}
 
 
 @dataclass
 class ClaudiniConfig:
     name: str = "claudini"
     type: str = "discrete"
-    version: str = "claude_oss_v53"
+    version: str = "0.0.1"
+    variant: str = "claude_oss_v53"
     placement: str = "suffix"
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
 
@@ -81,20 +82,41 @@ class ClaudiniConfig:
 class ClaudiniAttack(Attack):
     def __init__(self, config: ClaudiniConfig):
         super().__init__(config)
-        self._normalized_version = self._normalize_version(self.config.version)
-        if self._normalized_version not in _SUPPORTED_VERSIONS:
+        self.logger = logging.getLogger(__name__)
+        self._resolve_legacy_variant_override()
+        self._normalized_variant = self._normalize_variant(self.config.variant)
+        if self._normalized_variant not in _SUPPORTED_VARIANTS:
             raise ValueError(
-                f"Unsupported claudini version '{self.config.version}'. "
+                f"Unsupported claudini variant '{self.config.variant}'. "
                 "Currently supported: ['claude_v63', 'claude_v82', 'claude_oss_v53', 'claude_v53-oss']"
             )
         self._apply_version_defaults()
 
         self.disallowed_ids: torch.Tensor | None = None
-        self.logger = logging.getLogger(__name__)
 
     @staticmethod
-    def _normalize_version(version: str) -> str:
-        return _VERSION_ALIASES.get(version, version)
+    def _normalize_variant(variant: str) -> str:
+        return _VARIANT_ALIASES.get(variant, variant)
+
+    def _resolve_legacy_variant_override(self) -> None:
+        # Backward compatibility: older configs used `version=<claude_variant>`.
+        legacy_variant = self._normalize_variant(self.config.version)
+        if legacy_variant in _SUPPORTED_VARIANTS:
+            configured_variant = self._normalize_variant(self.config.variant)
+            if configured_variant != "claude_oss_v53" and configured_variant != legacy_variant:
+                raise ValueError(
+                    "Conflicting Claudini config: got legacy variant in `version` and a different `variant` value."
+                )
+            self.logger.warning(
+                "Using legacy `attacks.claudini.version=%s` as variant override. "
+                "Please switch to `attacks.claudini.variant=%s` and keep `version=%s`.",
+                self.config.version,
+                legacy_variant,
+                self.config.version if "." in self.config.version else "0.0.1",
+            )
+            self.config.variant = legacy_variant
+            if "." not in self.config.version:
+                self.config.version = "0.0.1"
 
     @staticmethod
     def _validate_single_turn_conversation(conversation: Conversation) -> None:
@@ -103,7 +125,7 @@ class ClaudiniAttack(Attack):
 
     def _apply_version_defaults(self) -> None:
         # Apply v82 defaults only when config is still at local v63 defaults.
-        if self._normalized_version == "claude_v82":
+        if self._normalized_variant == "claude_v82":
             if (
                 self.config.lr == 10.0
                 and self.config.momentum == 0.99
@@ -118,7 +140,7 @@ class ClaudiniAttack(Attack):
                 self.config.lsgm_gamma = 0.70
 
         # Apply upstream OSS defaults only when config is still at local ADC defaults.
-        if self._normalized_version == "claude_oss_v53":
+        if self._normalized_variant == "claude_oss_v53":
             if self.config.momentum == 0.99:
                 self.config.momentum = 0.908
             if self.config.allow_non_ascii is False:
@@ -291,11 +313,11 @@ class ClaudiniAttack(Attack):
         tokenizer: PreTrainedTokenizerBase,
         conversation,
     ) -> SingleAttackRunResult:
-        if self._normalized_version in {"claude_v63", "claude_v82"}:
+        if self._normalized_variant in {"claude_v63", "claude_v82"}:
             return self._attack_single_conversation_adc(model, tokenizer, conversation)
-        if self._normalized_version == "claude_oss_v53":
+        if self._normalized_variant == "claude_oss_v53":
             return self._attack_single_conversation_oss_v53(model, tokenizer, conversation)
-        raise ValueError(f"Unsupported claudini version '{self.config.version}'")
+        raise ValueError(f"Unsupported claudini variant '{self.config.variant}'")
 
     def _attack_single_conversation_adc(
         self,

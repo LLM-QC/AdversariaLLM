@@ -100,6 +100,7 @@ The framework supports various adversarial attack algorithms:
 - **GCG** - Greedy Coordinate Gradient attack (with various objectives, including REINFORCE)
 - **PAIR** - Prompt Automatic Iterative Refinement
 - **AutoDAN** - Automatic prompt generation
+- **Claudini** - Gradient-based discrete suffix optimization with `claude_v63`, `claude_v82`, and `claude_oss_v53` variants
 - **PGD** - Projected Gradient Descent (continuous in embedding and indicator-space, with & without discretization)
 - **Random Search** - Baseline random optimization
 - **Human Jailbreaks** - Curated human-written prompts
