@@ -38,6 +38,11 @@ class DummyModel(torch.nn.Module):
     def get_input_embeddings(self):
         return self.emb
 
+    def num_parameters(self, exclude_embeddings=True):
+        if exclude_embeddings:
+            return sum(p.numel() for name, p in self.named_parameters() if not name.startswith("emb."))
+        return sum(p.numel() for p in self.parameters())
+
     def forward(self, input_ids=None, inputs_embeds=None, attention_mask=None):
         if inputs_embeds is None:
             assert input_ids is not None
@@ -102,7 +107,7 @@ def test_claudini_v63_run_smoke(monkeypatch):
     assert run.steps[0].loss is not None
 
 
-@pytest.mark.parametrize("variant", ["claude_v82", "claude_oss_v53", "claude_v53-oss"])
+@pytest.mark.parametrize("variant", ["claude_v82", "claude_oss_v53"])
 def test_claudini_other_versions_smoke(monkeypatch, variant):
     monkeypatch.setattr("adversariallm.attacks.claudini.prepare_conversation", _mock_prepare_conversation)
     monkeypatch.setattr("adversariallm.attacks.claudini.generate_ragged_batched", _mock_generate_ragged_batched)
@@ -144,10 +149,3 @@ def test_claudini_last_step_sampling_override(monkeypatch):
     assert len(run.steps) == 2
     assert len(run.steps[0].model_completions) == 1
     assert len(run.steps[1].model_completions) == 5
-
-
-def test_claudini_legacy_version_override_maps_to_variant():
-    cfg = ClaudiniConfig(version="claude_v82")
-    attack = ClaudiniAttack(cfg)
-    assert attack.config.version == "0.0.1"
-    assert attack.config.variant == "claude_v82"

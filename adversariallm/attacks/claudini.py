@@ -15,7 +15,7 @@ Implementations are based on https://github.com/romovpa/claudini
 Supported variants:
 - ``claude_v63``: decoupled ADC + LSGM
 - ``claude_v82``: v63 core with v82 defaults
-- ``claude_oss_v53`` / ``claude_v53-oss``: DPTO + MAC coarse-to-fine replacement
+- ``claude_oss_v53``: DPTO + MAC coarse-to-fine replacement
 """
 
 import copy
@@ -42,7 +42,6 @@ _NORM_PATTERNS = (
     ".ln_1",
     ".ln_2",
 )
-_VARIANT_ALIASES = {"claude_v53-oss": "claude_oss_v53"}
 _SUPPORTED_VARIANTS = {"claude_v63", "claude_v82", "claude_oss_v53"}
 _VARIANT_DEFAULTS = {
     "claude_v63": {
@@ -113,40 +112,15 @@ class ClaudiniAttack(Attack):
     def __init__(self, config: ClaudiniConfig):
         super().__init__(config)
         self.logger = logging.getLogger(__name__)
-        self._resolve_legacy_variant_override()
-        self._normalized_variant = self._normalize_variant(self.config.variant)
-        if self._normalized_variant not in _SUPPORTED_VARIANTS:
+        if self.config.variant not in _SUPPORTED_VARIANTS:
             raise ValueError(
                 f"Unsupported claudini variant '{self.config.variant}'. "
-                "Currently supported: ['claude_v63', 'claude_v82', 'claude_oss_v53', 'claude_v53-oss']"
+                "Currently supported: ['claude_v63', 'claude_v82', 'claude_oss_v53']"
             )
+        self._normalized_variant = self.config.variant
         self._apply_version_defaults()
 
         self.disallowed_ids: torch.Tensor | None = None
-
-    @staticmethod
-    def _normalize_variant(variant: str) -> str:
-        return _VARIANT_ALIASES.get(variant, variant)
-
-    def _resolve_legacy_variant_override(self) -> None:
-        # Backward compatibility: older configs used `version=<claude_variant>`.
-        legacy_variant = self._normalize_variant(self.config.version)
-        if legacy_variant in _SUPPORTED_VARIANTS:
-            configured_variant = self._normalize_variant(self.config.variant)
-            if configured_variant != "claude_oss_v53" and configured_variant != legacy_variant:
-                raise ValueError(
-                    "Conflicting Claudini config: got legacy variant in `version` and a different `variant` value."
-                )
-            self.logger.warning(
-                "Using legacy `attacks.claudini.version=%s` as variant override. "
-                "Please switch to `attacks.claudini.variant=%s` and keep `version=%s`.",
-                self.config.version,
-                legacy_variant,
-                self.config.version if "." in self.config.version else "0.0.1",
-            )
-            self.config.variant = legacy_variant
-            if "." not in self.config.version:
-                self.config.version = "0.0.1"
 
     @staticmethod
     def _validate_single_turn_conversation(conversation: Conversation) -> None:
@@ -316,17 +290,14 @@ class ClaudiniAttack(Attack):
         n_tokens_out: int,
         k_restarts: int,
     ) -> int:
-        try:
-            return int(
-                get_flops(
-                    model,
-                    n_tokens_in=n_tokens_in * k_restarts,
-                    n_tokens_out=n_tokens_out * k_restarts,
-                    type="forward_and_backward",
-                )
+        return int(
+            get_flops(
+                model,
+                n_tokens_in=n_tokens_in * k_restarts,
+                n_tokens_out=n_tokens_out * k_restarts,
+                type="forward_and_backward",
             )
-        except Exception:
-            return 0
+        )
 
     def _attack_single_conversation(
         self,

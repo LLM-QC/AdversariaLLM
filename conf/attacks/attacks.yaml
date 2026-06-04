@@ -132,7 +132,7 @@ claudini:
   name: claudini
   type: discrete
   version: 0.0.1
-  variant: claude_oss_v53 # supported: claude_v63, claude_v82, claude_oss_v53 (alias: claude_v53-oss)
+  variant: claude_oss_v53 # supported: claude_v63, claude_v82, claude_oss_v53
   placement: suffix
   seed: ${attacks._default.seed}
   generation_config: ${attacks._default.generation_config}
