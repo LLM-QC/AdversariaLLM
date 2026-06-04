@@ -43,6 +43,32 @@ _NORM_PATTERNS = (
 )
 _VARIANT_ALIASES = {"claude_v53-oss": "claude_oss_v53"}
 _SUPPORTED_VARIANTS = {"claude_v63", "claude_v82", "claude_oss_v53"}
+_VARIANT_DEFAULTS = {
+    "claude_v63": {
+        "lr": 10.0,
+        "momentum": 0.99,
+        "ema_alpha": 0.01,
+        "num_starts": 6,
+        "lsgm_gamma": 0.85,
+        "allow_non_ascii": False,
+    },
+    "claude_v82": {
+        "lr": 12.0,
+        "momentum": 0.99,
+        "ema_alpha": 0.01,
+        "num_starts": 8,
+        "lsgm_gamma": 0.70,
+        "allow_non_ascii": False,
+    },
+    "claude_oss_v53": {
+        "lr": 10.0,
+        "momentum": 0.908,
+        "ema_alpha": 0.01,
+        "num_starts": 6,
+        "lsgm_gamma": 0.85,
+        "allow_non_ascii": True,
+    },
+}
 
 
 @dataclass
@@ -64,11 +90,11 @@ class ClaudiniConfig:
     optim_str_init: str = "! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !"
 
     # ADC-style defaults (v63/v82)
-    lr: float = 10.0
-    momentum: float = 0.99
-    ema_alpha: float = 0.01
-    num_starts: int = 6
-    lsgm_gamma: float = 0.85
+    lr: float | None = None
+    momentum: float | None = None
+    ema_alpha: float | None = None
+    num_starts: int | None = None
+    lsgm_gamma: float | None = None
     # DPTO-style defaults (oss_v53)
     num_candidates: int = 80
     topk_per_position: int = 300
@@ -76,7 +102,7 @@ class ClaudiniConfig:
     n_replace: int = 2
     switch_fraction: float = 0.8
 
-    allow_non_ascii: bool = False
+    allow_non_ascii: bool | None = None
     allow_special: bool = False
     log_progress: bool = True
     progress_log_step_interval: int = 100
@@ -127,27 +153,10 @@ class ClaudiniAttack(Attack):
         assert conversation[0]["role"] == "user" and conversation[1]["role"] == "assistant"
 
     def _apply_version_defaults(self) -> None:
-        # Apply v82 defaults only when config is still at local v63 defaults.
-        if self._normalized_variant == "claude_v82":
-            if (
-                self.config.lr == 10.0
-                and self.config.momentum == 0.99
-                and self.config.ema_alpha == 0.01
-                and self.config.num_starts == 6
-                and self.config.lsgm_gamma == 0.85
-            ):
-                self.config.lr = 12.0
-                self.config.momentum = 0.99
-                self.config.ema_alpha = 0.01
-                self.config.num_starts = 8
-                self.config.lsgm_gamma = 0.70
-
-        # Apply upstream OSS defaults only when config is still at local ADC defaults.
-        if self._normalized_variant == "claude_oss_v53":
-            if self.config.momentum == 0.99:
-                self.config.momentum = 0.908
-            if self.config.allow_non_ascii is False:
-                self.config.allow_non_ascii = True
+        variant_defaults = _VARIANT_DEFAULTS[self._normalized_variant]
+        for key, default_value in variant_defaults.items():
+            if getattr(self.config, key) is None:
+                setattr(self.config, key, default_value)
 
     def run(
         self,

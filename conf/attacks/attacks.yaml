@@ -141,17 +141,17 @@ claudini:
   n_tokens_adv: 20
   init_mode: manual # manual or random_allowed
   optim_str_init: "! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !"
-  lr: 10.0
-  momentum: 0.99
-  ema_alpha: 0.01
-  num_starts: 6
-  lsgm_gamma: 0.85
+  lr: null # null => use the selected variant's runtime default; set a value here to override it
+  momentum: null
+  ema_alpha: null
+  num_starts: null
+  lsgm_gamma: null
   num_candidates: 80
   topk_per_position: 300
   dpto_temperature: 0.4
   n_replace: 2
   switch_fraction: 0.8
-  allow_non_ascii: false
+  allow_non_ascii: null # null => use the selected variant's runtime default
   allow_special: false
   log_progress: true
   progress_log_step_interval: 100
