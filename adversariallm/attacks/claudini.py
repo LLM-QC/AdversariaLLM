@@ -10,13 +10,13 @@
   url = {https://arxiv.org/abs/2603.24511},
 }
 
+Implementations are based on https://github.com/romovpa/claudini
+
 Supported variants:
-- ``claude_v63``: decoupled ADC + LSGM (ported from upstream v63 flow)
+- ``claude_v63``: decoupled ADC + LSGM
 - ``claude_v82``: v63 core with v82 defaults
 - ``claude_oss_v53`` / ``claude_v53-oss``: DPTO + MAC coarse-to-fine replacement
 """
-
-from __future__ import annotations
 
 import copy
 import logging
