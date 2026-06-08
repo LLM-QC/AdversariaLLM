@@ -72,7 +72,8 @@ class PGDAttack(Attack):
         super().__init__(config)
         self.zero_init_attack = False  # Consider making this a config option if needed
 
-    def run(self, model: PreTrainedModel, tokenizer, dataset) -> AttackResult:
+    def run(self, model: PreTrainedModel, tokenizer, dataset, _defense) -> AttackResult:
+        # Runtime defenses are not supported by PGD yet.
         self._initialize_embedding_scale(model)
         original_model = self._maybe_load_original_model()
 

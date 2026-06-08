@@ -55,7 +55,7 @@ def test_human_jailbreaks_attack():
             "trust_remote_code": True
         })
         model, tokenizer = load_model_and_tokenizer(model_config)
-        result = attack.run(model, tokenizer, dataset)
+        result = attack.run(model, tokenizer, dataset, None)
 
         # Check that result has expected structure
         assert result is not None

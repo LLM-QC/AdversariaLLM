@@ -8,10 +8,10 @@ from typing import Any, Literal
 import torch
 
 from ..io_utils import load_model_and_tokenizer
-from ..lm_utils import with_max_batchsize
-from ..lm_utils.text_generation import GenerationResult, RetryOverrides, TextGenerator
+from ..lm_utils import LocalTextGenerator, with_max_batchsize
+from ..lm_utils.text_generation import GenerationResult, RetryOverrides
 from ..types import Conversation
-from .base import DefenseDecision
+from .base import Defense, DefenseDecision
 
 logger = logging.getLogger(__name__)
 
@@ -82,16 +82,19 @@ def _last_user_content(conv: Conversation) -> str:
     return ""
 
 
-class PolyGuardDefense(TextGenerator):
+class PolyGuardDefense(Defense):
     DEFENSE_TYPE = "polyguard"
-    CAPABILITIES = {"black_box_generation", "string_detection"}
 
-    def __init__(self, base_generator: TextGenerator, config: PolyGuardConfig):
-        super().__init__()
-        self.base_generator = base_generator
+    def __init__(self, model, tokenizer, config: PolyGuardConfig, default_generate_kwargs: dict[str, Any] | None = None):
+        super().__init__(model, tokenizer)
         self.config = config
+        self.text_generator = LocalTextGenerator(
+            model,
+            tokenizer,
+            default_generate_kwargs=default_generate_kwargs,
+        )
         tokenizer_id = config.tokenizer_id or config.model_id
-        self.model, self.tokenizer = load_model_and_tokenizer(
+        self.guard_model, self.guard_tokenizer = load_model_and_tokenizer(
             {
                 "id": config.model_id,
                 "tokenizer_id": tokenizer_id,
@@ -107,19 +110,21 @@ class PolyGuardDefense(TextGenerator):
         # already chooses correctly; this allows explicit override where feasible.
         if config.device != "auto":
             try:
-                if not hasattr(self.model, "hf_device_map"):
-                    self.model = self.model.to(config.device)
+                if not hasattr(self.guard_model, "hf_device_map"):
+                    self.guard_model = self.guard_model.to(config.device)
             except Exception as exc:
                 logger.warning("Could not move PolyGuard model to device '%s': %s", config.device, exc)
-        self.model.eval()
+        self.guard_model.eval()
 
     @classmethod
     def from_config(
         cls,
         cfg: dict[str, Any],
         *,
-        base_generator: TextGenerator,
+        model,
+        tokenizer,
         default_cache_dir: str | None = None,
+        default_generate_kwargs: dict[str, Any] | None = None,
     ) -> "PolyGuardDefense":
         model_cfg = dict(cfg["model"])
         model_cfg["model_id"] = model_cfg.pop("id")
@@ -134,11 +139,12 @@ class PolyGuardDefense(TextGenerator):
         }
 
         polyguard_cfg = PolyGuardConfig(**model_cfg, **runtime_fields)
-        return cls(base_generator=base_generator, config=polyguard_cfg)
-
-    @classmethod
-    def capabilities(cls) -> set[str]:
-        return set(cls.CAPABILITIES)
+        return cls(
+            model=model,
+            tokenizer=tokenizer,
+            config=polyguard_cfg,
+            default_generate_kwargs=default_generate_kwargs,
+        )
 
     @torch.no_grad()
     def detect(self, prompts: list[str], responses: list[str]) -> list[dict[str, bool]]:
@@ -152,7 +158,7 @@ class PolyGuardDefense(TextGenerator):
             for p, r in zip(prompts, responses)
         ]
         formatted = [
-            self.tokenizer.apply_chat_template(
+            self.guard_tokenizer.apply_chat_template(
                 message,
                 tokenize=False,
                 add_generation_prompt=True,
@@ -172,26 +178,26 @@ class PolyGuardDefense(TextGenerator):
         )
 
     def _detect_batch(self, formatted_batch: list[str]) -> list[dict[str, bool]]:
-        tokenized = self.tokenizer(
+        tokenized = self.guard_tokenizer(
             formatted_batch,
             return_tensors="pt",
             padding=True,
             add_special_tokens=False,
         )
-        model_device = next(self.model.parameters()).device
+        model_device = next(self.guard_model.parameters()).device
         input_ids = tokenized["input_ids"].to(model_device)
         attention_mask = tokenized["attention_mask"].to(model_device)
         prompt_len = input_ids.shape[1]
 
-        outputs = self.model.generate(
+        outputs = self.guard_model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
             max_new_tokens=self.config.max_new_tokens,
-            pad_token_id=self.tokenizer.eos_token_id,
+            pad_token_id=self.guard_tokenizer.eos_token_id,
             do_sample=False,
         )
         generated = outputs[:, prompt_len:]
-        decoded = self.tokenizer.batch_decode(generated, skip_special_tokens=True)
+        decoded = self.guard_tokenizer.batch_decode(generated, skip_special_tokens=True)
         results = [parse_polyguard_output(text) for text in decoded]
 
         del input_ids, attention_mask, outputs, generated
@@ -226,7 +232,7 @@ class PolyGuardDefense(TextGenerator):
         retry_overrides: RetryOverrides | None = None,
         **kwargs: Any,
     ) -> GenerationResult:
-        base = self.base_generator.generate(
+        base = self.text_generator.generate(
             convs,
             num_return_sequences=num_return_sequences,
             max_new_tokens=max_new_tokens,

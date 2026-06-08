@@ -39,6 +39,7 @@ class HumanJailbreaksAttack(Attack):
         model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
         dataset: torch.utils.data.Dataset,
+        _defense,
     ) -> AttackResult:
         """Run the HumanJailbreak attacks on the given dataset.
 
@@ -47,6 +48,8 @@ class HumanJailbreaksAttack(Attack):
             model: The model to attack.
             tokenizer: The tokenizer to use.
             dataset: The dataset to attack.
+            _defense: Reserved for the shared attack interface; runtime defenses
+                are not supported by HumanJailbreaks yet.
 
         Returns:
         -------

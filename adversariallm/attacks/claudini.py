@@ -138,7 +138,9 @@ class ClaudiniAttack(Attack):
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
         dataset: PromptDataset,
+        _defense,
     ) -> AttackResult:
+        # Runtime defenses are not supported by Claudini yet.
         self.disallowed_ids = get_disallowed_ids(
             tokenizer,
             allow_non_ascii=self.config.allow_non_ascii,

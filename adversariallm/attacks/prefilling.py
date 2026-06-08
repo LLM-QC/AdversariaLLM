@@ -32,7 +32,9 @@ class PrefillingAttack(Attack):
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
         dataset: PromptDataset,
+        _defense,
     ) -> AttackResult:
+        # Runtime defenses are not supported by Prefilling yet.
         t_start = time.time()
         token_list = []
         original_conversations = []

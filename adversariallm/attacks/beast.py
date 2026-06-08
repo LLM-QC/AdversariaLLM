@@ -51,7 +51,7 @@ class BEASTAttack(Attack):
         self.prefix_cache = None
 
     @torch.no_grad()
-    def run(self, model: AutoModelForCausalLM, tokenizer: AutoTokenizer, dataset) -> AttackResult:
+    def run(self, model: AutoModelForCausalLM, tokenizer: AutoTokenizer, dataset, _defense) -> AttackResult:
         """
         Runs the BEASTAttack on a given model and dataset.
 
@@ -60,6 +60,8 @@ class BEASTAttack(Attack):
             tokenizer: Tokenizer compatible with the model.
             dataset: Iterable of (message, target) pairs containing the input prompts
                 and the desired target strings.
+            _defense: Reserved for the shared attack interface; runtime defenses
+                are not supported by BEAST yet.
 
         Returns:
             AttackResult: Holds all data about the generated attacks, losses, prompts,

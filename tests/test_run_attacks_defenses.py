@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 import pytest
 
 import run_attacks
@@ -41,40 +41,77 @@ def test_collect_configs_includes_defense(monkeypatch):
     run_configs = run_attacks.collect_configs(cfg)
     assert len(run_configs) == 1
     assert run_configs[0].defense == "polyguard"
-    assert run_configs[0].attack_params["defense"]["type"] == "polyguard"
+    assert isinstance(run_configs[0].attack_params, DictConfig)
+    assert isinstance(run_configs[0].defense_params, DictConfig)
+    assert "defense" not in run_configs[0].attack_params
+    assert run_configs[0].defense_params["type"] == "polyguard"
 
 
-def test_runtime_defense_capability_validation(monkeypatch):
-    class _DummyAttack:
-        def __init__(self, _cfg):
-            pass
+def test_collect_configs_rejects_unsupported_attack_before_loading_dataset(monkeypatch):
+    def _unexpected_dataset_lookup(_name):
+        pytest.fail("Compatibility validation must happen before loading the dataset")
 
-        def run(self, _model, _tokenizer, _dataset):
-            from adversariallm.attacks.attack import AttackResult
+    monkeypatch.setattr(run_attacks.PromptDataset, "from_name", _unexpected_dataset_lookup)
+    cfg = OmegaConf.create(
+        {
+            "models": {"m": {"id": "m"}},
+            "datasets": {"d": {"idx": [0]}},
+            "attacks": {"gcg": {"name": "gcg"}},
+            "defenses": {"polyguard": {"type": "polyguard"}},
+            "model": "m",
+            "dataset": "d",
+            "attack": "gcg",
+            "defense": "polyguard",
+            "overwrite": True,
+        }
+    )
 
-            return AttackResult(runs=[])
+    with pytest.raises(ValueError, match="incompatible with runtime defenses"):
+        run_attacks.collect_configs(cfg)
 
-    monkeypatch.setattr(run_attacks, "load_model_and_tokenizer", lambda _params: ("m", "t"))
-    monkeypatch.setattr(run_attacks, "PromptDataset", type("PD", (), {"from_name": staticmethod(lambda _n: (lambda _p: []))}))
-    monkeypatch.setattr(run_attacks.Attack, "from_name", classmethod(lambda _cls, _n: _DummyAttack))
-    monkeypatch.setattr(run_attacks, "log_attack", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(run_attacks, "get_defense_capabilities", lambda _cfg: set())
 
+def test_runner_creates_and_passes_defense(monkeypatch):
     from adversariallm.io_utils.config import RunConfig
+
+    sentinel_defense = object()
+    calls = {}
+    events = []
+
+    class _DummyAttack:
+        def __init__(self, attack_params):
+            events.append("attack")
+            calls["attack_params"] = attack_params
+
+        def run(self, model, tokenizer, dataset, defense):
+            calls["run_args"] = (model, tokenizer, dataset, defense)
+            return "results"
+
+    monkeypatch.setattr(run_attacks, "load_model_and_tokenizer", lambda _params: ("model", "tokenizer"))
+    monkeypatch.setattr(run_attacks, "PromptDataset", type("PD", (), {"from_name": staticmethod(lambda _n: (lambda _p: []))}))
+    def _create_defense(cfg, *, model, tokenizer):
+        events.append("defense")
+        return sentinel_defense
+
+    monkeypatch.setattr(run_attacks, "create_defense", _create_defense)
+    monkeypatch.setattr(run_attacks.Attack, "from_name", classmethod(lambda _cls, _name: _DummyAttack))
+    monkeypatch.setattr(run_attacks, "log_attack", lambda *_args, **_kwargs: None)
 
     rc = RunConfig(
         model="m",
         dataset="d",
-        attack="actor",
-        defense="polyguard",
+        attack="direct",
+        defense=None,
         model_params={},
         dataset_params={},
-        attack_params={"defense": {"type": "polyguard"}},
-        defense_params={"type": "polyguard"},
+        attack_params={"name": "direct"},
+        defense_params=None,
     )
     cfg = OmegaConf.create({"save_dir": "/tmp", "embed_dir": "/tmp"})
-    with pytest.raises(ValueError, match="lacks required capabilities"):
-        run_attacks.run_attacks([rc], cfg, "2026-04-06/00-00-00")
+
+    run_attacks.run_attacks([rc], cfg, "2026-04-06/00-00-00")
+
+    assert events == ["attack", "defense"]
+    assert calls["run_args"] == ("model", "tokenizer", [], sentinel_defense)
 
 
 def test_collect_configs_resolves_interpolations_with_defense(monkeypatch):

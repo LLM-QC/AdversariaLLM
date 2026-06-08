@@ -58,7 +58,7 @@ def test_pgd_attack():
             "trust_remote_code": True
         })
         model, tokenizer = load_model_and_tokenizer(model_config)
-        result = attack.run(model, tokenizer, dataset)
+        result = attack.run(model, tokenizer, dataset, None)
 
         # Check that the result has expected structure
         assert result is not None

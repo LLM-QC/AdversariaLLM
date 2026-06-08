@@ -17,33 +17,25 @@ def _fake_prepare_conversation(_tokenizer, conversation):
     ]
 
 
-def _fake_get_losses_batched(_model, targets, token_list, initial_batch_size, **kwargs):
-    assert len(targets) == len(token_list)
-    return [torch.arange(t.numel(), dtype=torch.float32) for t in token_list]
-
-
 def test_direct_runtime_generator(monkeypatch):
     monkeypatch.setattr("adversariallm.attacks.direct.prepare_conversation", _fake_prepare_conversation)
-    monkeypatch.setattr("adversariallm.attacks.direct.get_losses_batched", _fake_get_losses_batched)
 
-    class FakeLocalTextGenerator:
-        def __init__(self, _model, _tokenizer):
-            pass
+    class FakeDefense:
+        def loss(self, full_token_tensors, prompt_token_tensors, *, initial_batch_size, verbose=False):
+            assert len(full_token_tensors) == 1
+            assert len(prompt_token_tensors) == 1
+            assert initial_batch_size == 1
+            assert verbose is False
+            return [1.5]
 
         def generate(self, convs, **kwargs):
             assert len(convs) == 1
             assert kwargs["initial_batch_size"] == 1
             return GenerationResult(gen=[["direct completion"]], input_ids=[[1, 2]])
 
-    monkeypatch.setattr("adversariallm.attacks.direct.LocalTextGenerator", FakeLocalTextGenerator)
-    monkeypatch.setattr(
-        "adversariallm.attacks.direct.create_defended_text_generator",
-        lambda cfg, base_generator: base_generator,
-    )
-
     dataset = [[{"role": "user", "content": "u"}, {"role": "assistant", "content": "a"}]]
     attack = DirectAttack(DirectConfig())
-    res = attack.run(model=object(), tokenizer=object(), dataset=dataset)
+    res = attack.run(model=object(), tokenizer=object(), dataset=dataset, defense=FakeDefense())
 
     step = res.runs[0].steps[0]
     assert step.model_completions == ["direct completion"]

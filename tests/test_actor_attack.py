@@ -1,6 +1,7 @@
 from omegaconf import OmegaConf
 
 from adversariallm.attacks.actor import ActorAttack
+from adversariallm.defenses import create_defense
 from adversariallm.io_utils import load_model_and_tokenizer
 
 
@@ -49,10 +50,9 @@ def test_harm_extraction():
             "trust_remote_code": True
         })
         model, tokenizer = load_model_and_tokenizer(model_config)
-        attack.run(model, tokenizer, dataset)
+        attack.run(model, tokenizer, dataset, create_defense(None, model=model, tokenizer=tokenizer))
     except Exception as e:
         print(f"Error occurred: {e}")
         import traceback
         traceback.print_exc()
         raise
-

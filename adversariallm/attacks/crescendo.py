@@ -23,7 +23,7 @@ import transformers
 from beartype import beartype
 from dotenv import load_dotenv
 
-from ..defenses import create_defended_text_generator
+from ..defenses import Defense
 from ..io_utils import load_model_and_tokenizer
 from ..lm_utils import (
     APITextGenerator,
@@ -114,12 +114,13 @@ class CrescendoAttack(Attack[CrescendoAttackResult]):
         model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
         dataset: torch.utils.data.Dataset,
+        defense: Defense,
     ) -> CrescendoAttackResult:
         load_dotenv(override=True)
         base_url = os.getenv("BASE_URL_GPT")
         logging.info(f"BASE_URL_GPT: {repr(base_url)}")
 
-        target_model, attack_model = self.setup_models(model, tokenizer)
+        target_model, attack_model = self.setup_models(model, tokenizer, defense)
         data = list(dataset)
         test_cases = [
             {
@@ -149,12 +150,8 @@ class CrescendoAttack(Attack[CrescendoAttackResult]):
         self,
         model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
-    ) -> tuple[TextGenerator, TextGenerator]:
-        # target
-        target_generate_kwargs = {**self.target_generation_config, "filters": self.free_gen_repetition_filters}
-        target = LocalTextGenerator(model, tokenizer, default_generate_kwargs=target_generate_kwargs)
-        target = create_defended_text_generator(getattr(self.config, "defense", None), base_generator=target)
-
+        defense: Defense,
+    ) -> tuple[Defense, TextGenerator]:
         # attacker
         if self.attack_model_config.use_api:
             attack_generate_kwargs = {**self.attack_generation_config}
@@ -175,12 +172,12 @@ class CrescendoAttack(Attack[CrescendoAttackResult]):
                 default_generate_kwargs=self.attack_generation_config,
             )
 
-        return target, attacker
+        return defense, attacker
 
     def run_crescendomation(
         self,
         test_cases: list[dict],
-        target_model: TextGenerator,
+        target_model: Defense,
         attack_model: TextGenerator,
         max_backtracks: int,
     ):
@@ -260,6 +257,7 @@ class CrescendoAttack(Attack[CrescendoAttackResult]):
                 prompts,
                 filters=self.free_gen_repetition_filters,
                 context="crescendo_target_step",
+                generate_kwargs=dict(self.target_generation_config),
             )
             input_ids = [conv[-1].get("input_ids") if conv else None for conv in active_conv_t_list]
             for round_number, conv_a, response_summary in zip(

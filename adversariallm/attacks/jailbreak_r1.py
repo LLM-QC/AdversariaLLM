@@ -29,9 +29,9 @@ import torch
 import transformers
 
 from .attack import Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult
-from ..defenses import create_defended_text_generator
+from ..defenses import Defense
 from ..io_utils import free_vram, load_model_and_tokenizer
-from ..lm_utils import LocalTextGenerator, generate_ragged_batched, prepare_conversation
+from ..lm_utils import generate_ragged_batched, prepare_conversation
 from ..types import Conversation
 
 
@@ -106,6 +106,11 @@ class JailbreakR1Config:
     prompt_cache_subset_strategy: str = "first_n"  # first_n or seeded_random
     # Enforce strict metadata/fingerprint matching when reading cache.
     prompt_cache_strict_match: bool = True
+
+
+@dataclass(kw_only=True)
+class JailbreakR1AttackStepResult(AttackStepResult):
+    think: str
 
 
 class JailbreakR1Attack(Attack):
@@ -485,15 +490,12 @@ class JailbreakR1Attack(Attack):
         model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
         dataset: torch.utils.data.Dataset,
+        defense: Defense,
     ) -> AttackResult:
         conversations = list(dataset)
         behavior_ids = self._extract_behavior_ids(dataset, len(conversations))
         for conversation in conversations:
             assert len(conversation) == 2, "Jailbreak-R1 attack currently assumes single-turn conversation."
-
-        runtime_defense_cfg = getattr(self.config, "defense", None)
-        runtime_generator = LocalTextGenerator(model, tokenizer)
-        runtime_generator = create_defended_text_generator(runtime_defense_cfg, base_generator=runtime_generator)
 
         mode = self._mode()
         use_cache = mode in {"read", "read_write"}
@@ -593,7 +595,7 @@ class JailbreakR1Attack(Attack):
             t_prepare = time.time() - t_prepare_start
 
             t_target_start = time.time()
-            generation_result = runtime_generator.generate(
+            generation_result = defense.generate(
                 generation_conversations,
                 initial_batch_size=len(generation_conversations),
                 max_new_tokens=self.config.generation_config.max_new_tokens,
@@ -603,19 +605,10 @@ class JailbreakR1Attack(Attack):
                 num_return_sequences=self.config.generation_config.num_return_sequences,
             )
             completions_per_step = generation_result.gen
-            completions_raw = generation_result.raw_gen
-            defense_decisions = generation_result.defense_decisions
-            generation_input_ids = generation_result.input_ids
-            if generation_input_ids is None:
-                raise ValueError(
-                    "Jailbreak-R1 requires `generation_result.input_ids` from the runtime generator "
-                    "(expected for local/defended-local generators)."
-                )
-            if len(generation_input_ids) != len(model_inputs):
-                raise ValueError(
-                    "Jailbreak-R1 received mismatched input_ids length: "
-                    f"expected {len(model_inputs)}, got {len(generation_input_ids)}."
-                )
+            generation_input_ids = generation_result.require_input_ids(
+                "Jailbreak-R1",
+                expected_len=len(model_inputs),
+            )
             t_target = time.time() - t_target_start
 
             time_per_step = (t_attack + t_prepare + t_target) / max(1, len(model_inputs))
@@ -626,16 +619,11 @@ class JailbreakR1Attack(Attack):
                 parse_success,
                 model_input,
             ) in enumerate(model_inputs):
-                if defense_decisions is not None:
-                    decision_meta = [d.get("metadata", d) for d in defense_decisions[step]]
-                    step_defense_metadata = [{"think": think, **meta} for meta in decision_meta]
-                else:
-                    step_defense_metadata = [{"think": think}]
                 steps.append(
-                    AttackStepResult(
+                    JailbreakR1AttackStepResult(
                         step=step,
                         model_completions=completions_per_step[step],
-                        model_completions_raw=completions_raw[step] if completions_raw is not None else None,
+                        model_completions_raw=generation_result.raw_for(step),
                         model_input=model_input,
                         model_input_tokens=generation_input_ids[step],
                         time_taken=time_per_step,
@@ -645,7 +633,8 @@ class JailbreakR1Attack(Attack):
                                 "attack_prompt_length": [float(len(attack_prompt))],
                             }
                         },
-                        defense_metadata=step_defense_metadata,
+                        defense_metadata=generation_result.defense_metadata_for(step),
+                        think=think,
                     )
                 )
 

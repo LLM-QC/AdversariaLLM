@@ -113,20 +113,26 @@ The framework supports various adversarial attack algorithms:
 ## Defenses
 
 The framework supports optional runtime defenses configured via `conf/defenses/defenses.yaml`.
-Defenses are implemented as `TextGenerator` objects and are used directly by attacks during generation.
+At runtime, attacks interact with a `Defense` object rather than the model directly.
+A Defense could be a model combined with a linear probe filtering for harmful content.
 
-Runtime defense is currently supported by `actor`, `crescendo`, and `inpainting`.
+Runtime defenses are currently supported by `actor`, `ample_gcg`, `bon`, `crescendo`, `direct`,
+`inpainting`, `jailbreak_r1`, and `pair`.
 
-Example runtime defense:
+Example usage:
 
 ```bash
 python run_attacks.py \
-  attack=actor \
+  attack=pair \
   model=meta-llama/Meta-Llama-3.1-8B-Instruct \
   defense=polyguard
 ```
 
-Runtime defense is blocked for attacks that require model internals (e.g. gradient-based attacks such as `gcg`).
+### It's easy to add the custom defense you want ot benchmark!
+To add a custom defense, subclass `Defense`, implement `generate(...)`, add a `from_config(...)`
+constructor, and register the class in `adversariallm/defenses/registry.py`. Defenses can use
+`LocalTextGenerator` internally, but may also interact with the model directly, for example to
+inspect activations or alter decoding. You may use `PolyGuard` as a reference implementation.
 
 ## 📊 Evaluation and Judging
 

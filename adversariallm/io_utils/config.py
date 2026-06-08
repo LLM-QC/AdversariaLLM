@@ -28,6 +28,8 @@ def filter_config(run_config: RunConfig, dset_len: int, overwrite: bool = False)
     collection = db.runs
 
     OmegaConf.resolve(run_config.attack_params)
+    if run_config.defense_params is not None:
+        OmegaConf.resolve(run_config.defense_params)
     OmegaConf.resolve(run_config.dataset_params)
     OmegaConf.resolve(run_config.model_params)
     original_idx = run_config.dataset_params.idx

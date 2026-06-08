@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from adversariallm.defenses import create_defended_text_generator, parse_polyguard_output
+from adversariallm.defenses import Defense, NoDefense, create_defense, parse_polyguard_output
 from adversariallm.lm_utils.text_generation import GenerationResult, TextGenerator
 
 
@@ -30,15 +30,46 @@ def test_parse_polyguard_output_expected_fields():
     }
 
 
-def test_create_defended_text_generator_none_returns_base():
-    base = _EchoGenerator()
-    assert create_defended_text_generator(None, base_generator=base) is base
-    assert create_defended_text_generator({"type": "none"}, base_generator=base) is base
+def test_create_defense_none_returns_no_defense():
+    assert isinstance(create_defense(None, model=object(), tokenizer=object()), NoDefense)
+    assert isinstance(create_defense({"type": "none"}, model=object(), tokenizer=object()), NoDefense)
 
 
-def test_create_defended_text_generator_unknown_type():
+def test_create_defense_unknown_type():
     with pytest.raises(ValueError, match="Unknown defense type"):
-        create_defended_text_generator({"type": "not_a_real_defense"}, base_generator=_EchoGenerator())
+        create_defense({"type": "not_a_real_defense"}, model=object(), tokenizer=object())
+
+
+def test_defense_loss_matches_previous_target_token_slicing(monkeypatch):
+    from adversariallm.defenses import base as base_mod
+
+    class _LossOnlyDefense(Defense):
+        def generate(self, convs, **kwargs):
+            raise NotImplementedError
+
+    def _fake_get_losses_batched(model, targets, token_list, initial_batch_size, verbose):
+        assert len(targets) == len(token_list) == 3
+        return [
+            torch.arange(tokens.numel() - 1, dtype=torch.float32) + batch_idx * 10
+            for batch_idx, tokens in enumerate(token_list)
+        ]
+
+    monkeypatch.setattr(base_mod, "get_losses_batched", _fake_get_losses_batched)
+
+    full_tokens = [torch.arange(6), torch.arange(8), torch.arange(4)]
+    prompt_tokens = [full_tokens[0][:3], full_tokens[1][:2], full_tokens[2]]
+    losses = _LossOnlyDefense(object(), object()).loss(
+        full_tokens,
+        prompt_tokens,
+        initial_batch_size=1,
+    )
+
+    expected = [
+        torch.arange(5, dtype=torch.float32)[2:5].mean().item(),
+        (torch.arange(7, dtype=torch.float32) + 10)[1:7].mean().item(),
+        None,
+    ]
+    assert losses == expected
 
 
 def test_polyguard_uses_repo_model_loader_and_adaptive_batching(monkeypatch):
@@ -100,9 +131,9 @@ def test_polyguard_uses_repo_model_loader_and_adaptive_batching(monkeypatch):
 
     monkeypatch.setattr(polyguard_mod, "load_model_and_tokenizer", _fake_loader_config)
     monkeypatch.setattr(polyguard_mod, "with_max_batchsize", _fake_with_max_batchsize)
+    monkeypatch.setattr(polyguard_mod, "LocalTextGenerator", lambda _model, _tokenizer, default_generate_kwargs=None: _EchoGenerator())
 
-    base = _EchoGenerator()
-    defended = create_defended_text_generator(
+    defended = create_defense(
         {
             "type": "polyguard",
             "batch_size": 4,
@@ -122,10 +153,55 @@ def test_polyguard_uses_repo_model_loader_and_adaptive_batching(monkeypatch):
                 "cache_dir": None,
             },
         },
-        base_generator=base,
+        model=object(),
+        tokenizer=object(),
     )
 
     res = defended.generate([[{"role": "user", "content": "hello"}]])
     assert calls["loader"] == 1
     assert calls["batching"] == 1
     assert res.gen == [["raw:hello"]]
+
+
+def test_polyguard_preserves_batched_generation_order():
+    from adversariallm.defenses.base import DefenseDecision
+    from adversariallm.defenses.polyguard import PolyGuardDefense
+
+    class _RaggedGenerator:
+        def generate(self, convs, **kwargs):
+            assert len(convs) == 2
+            return GenerationResult(
+                gen=[["first-0", "first-1"], ["second-0"]],
+                input_ids=[[10], [20]],
+            )
+
+    defense = object.__new__(PolyGuardDefense)
+    defense.text_generator = _RaggedGenerator()
+
+    def _apply_batch(prompts, responses):
+        assert prompts == ["prompt-0", "prompt-0", "prompt-1"]
+        assert responses == ["first-0", "first-1", "second-0"]
+        return [
+            DefenseDecision(output_text=f"defended:{response}", metadata={"index": index})
+            for index, response in enumerate(responses)
+        ]
+
+    defense.apply_batch = _apply_batch
+    result = defense.generate(
+        [
+            [{"role": "user", "content": "prompt-0"}],
+            [{"role": "user", "content": "prompt-1"}],
+        ],
+        num_return_sequences=2,
+    )
+
+    assert result.gen == [
+        ["defended:first-0", "defended:first-1"],
+        ["defended:second-0"],
+    ]
+    assert result.raw_gen == [["first-0", "first-1"], ["second-0"]]
+    assert result.defense_decisions == [
+        [{"index": 0}, {"index": 1}],
+        [{"index": 2}],
+    ]
+    assert result.input_ids == [[10], [20]]

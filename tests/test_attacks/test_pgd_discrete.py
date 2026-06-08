@@ -58,7 +58,7 @@ def test_pgd_discrete_attack():
             "trust_remote_code": True
         })
         model, tokenizer = load_model_and_tokenizer(model_config)
-        attack.run(model, tokenizer, dataset)
+        attack.run(model, tokenizer, dataset, None)
     except Exception as e:
         print(f"Error occurred: {e}")
         import traceback

@@ -4,7 +4,9 @@ import torch
 from omegaconf import OmegaConf
 
 from adversariallm.attacks.pair import PAIRAttack
+from adversariallm.defenses import create_defense
 from adversariallm.io_utils import load_model_and_tokenizer
+from adversariallm.lm_utils.text_generation import GenerationResult
 
 
 def test_pair_attack():
@@ -60,7 +62,7 @@ def test_pair_attack():
             "trust_remote_code": True
         })
         model, tokenizer = load_model_and_tokenizer(model_config)
-        result = attack.run(model, tokenizer, dataset)
+        result = attack.run(model, tokenizer, dataset, create_defense(None, model=model, tokenizer=tokenizer))
 
         # Check that the result has expected structure
         assert result is not None
@@ -120,23 +122,33 @@ def test_pair_num_return_sequences_with_many_streams(monkeypatch):
 
     def _mock_get_response(self, conversations):
         n = len(conversations)
-        return [f"base-{i}" for i in range(n)], [torch.tensor([i], dtype=torch.long) for i in range(n)], 0
+        return (
+            [f"base-{i}" for i in range(n)],
+            [torch.tensor([i], dtype=torch.long) for i in range(n)],
+            0,
+            None,
+            None,
+        )
 
     def _mock_score(self, prompt_list, response_list):
         return [1 for _ in prompt_list], 0
 
-    def _mock_generate_ragged_batched(model, tokenizer, token_list, **kwargs):
-        n = len(token_list)
-        extras_per_prompt = kwargs["num_return_sequences"]
-        return [[f"extra-{i}-{j}" for j in range(extras_per_prompt)] for i in range(n)]
+    class FakeDefense:
+        def generate(self, conversations, **kwargs):
+            extras_per_prompt = kwargs["num_return_sequences"]
+            return GenerationResult(
+                gen=[
+                    [f"extra-{i}-{j}" for j in range(extras_per_prompt)]
+                    for i in range(len(conversations))
+                ]
+            )
 
     monkeypatch.setattr("adversariallm.attacks.pair.AttackLM.get_attack", _mock_get_attack)
     monkeypatch.setattr("adversariallm.attacks.pair.TargetLM.get_response", _mock_get_response)
     monkeypatch.setattr("adversariallm.attacks.pair.JudgeLM.score", _mock_score)
-    monkeypatch.setattr("adversariallm.attacks.pair.generate_ragged_batched", _mock_generate_ragged_batched)
 
     attack = PAIRAttack(cfg)
-    result = attack.run(DummyModel(), DummyTokenizer(), DummyDataset())
+    result = attack.run(DummyModel(), DummyTokenizer(), DummyDataset(), FakeDefense())
 
     assert len(result.runs) == 1
     assert len(result.runs[0].steps) == 1

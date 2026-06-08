@@ -207,6 +207,39 @@ class GenerationResult:
         """Returns the first choice of generation."""
         return [g[0] for g in self.gen]
 
+    def require_input_ids(self, caller: str, expected_len: int | None = None) -> list[list[int]]:
+        if self.input_ids is None:
+            raise ValueError(
+                f"{caller} requires `generation_result.input_ids` from the runtime generator "
+                "(expected for local/defended-local generators)."
+            )
+        if expected_len is not None and len(self.input_ids) != expected_len:
+            raise ValueError(
+                f"{caller} received mismatched `generation_result.input_ids` length: "
+                f"expected {expected_len}, got {len(self.input_ids)}."
+            )
+        return self.input_ids
+
+    def raw_for(self, idx: int) -> list[str] | None:
+        if self.raw_gen is None:
+            return None
+        return self.raw_gen[idx]
+
+    def raw0(self) -> list[str] | None:
+        if self.raw_gen is None:
+            return None
+        return [row[0] for row in self.raw_gen]
+
+    def defense_metadata_for(self, idx: int) -> list[dict[str, Any]] | None:
+        if self.defense_decisions is None:
+            return None
+        return [d.get("metadata", d) for d in self.defense_decisions[idx]]
+
+    def defense_metadata0(self) -> list[dict[str, Any]] | None:
+        if self.defense_decisions is None:
+            return None
+        return [row[0].get("metadata", row[0]) for row in self.defense_decisions]
+
     def __getitem__(self, k):
         return getattr(self, k)
 

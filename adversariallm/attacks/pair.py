@@ -25,9 +25,9 @@ from tqdm import trange
 
 from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
                      SingleAttackRunResult)
-from ..defenses import create_defended_text_generator
+from ..defenses import Defense
 from ..io_utils import load_model_and_tokenizer
-from ..lm_utils import LocalTextGenerator, generate_ragged_batched, get_flops, prepare_conversation
+from ..lm_utils import generate_ragged_batched, get_flops, prepare_conversation
 from ..types import Conversation
 
 
@@ -90,16 +90,21 @@ class PAIRAttack(Attack):
         model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
         dataset: torch.utils.data.Dataset,
+        defense: Defense,
     ) -> AttackResult:
         runs = []
         for conversation in dataset:
-            run = self.attack_single_prompt(
-                model, tokenizer, conversation
-            )
+            run = self.attack_single_prompt(model, tokenizer, conversation, defense)
             runs.append(run)
         return AttackResult(runs=runs)
 
-    def attack_single_prompt(self, model, tokenizer, conversation: Conversation) -> SingleAttackRunResult:
+    def attack_single_prompt(
+        self,
+        model,
+        tokenizer,
+        conversation: Conversation,
+        defense: Defense,
+    ) -> SingleAttackRunResult:
         # Initialize models
         # Can share underlying model and save VRAM if attack & target model are the same
         if self.config.attack_model.id == model.name_or_path:
@@ -107,14 +112,7 @@ class PAIRAttack(Attack):
         else:
             attack_model, attack_tokenizer = load_model_and_tokenizer(self.config.attack_model)
 
-        runtime_defense_cfg = getattr(self.config, "defense", None)
-        use_runtime_defense = bool(runtime_defense_cfg and runtime_defense_cfg.get("type", "none") != "none")
-        runtime_generator = None
-        if use_runtime_defense:
-            runtime_generator = LocalTextGenerator(model, tokenizer)
-            runtime_generator = create_defended_text_generator(runtime_defense_cfg, base_generator=runtime_generator)
-
-        target_lm = TargetLM(model, tokenizer, self.config.target_model, runtime_generator=runtime_generator)
+        target_lm = TargetLM(model, tokenizer, self.config.target_model, defense=defense)
         attack_lm = AttackLM(attack_model, attack_tokenizer, self.config.attack_model)
         if self.config.judge_model.id is None:
             judge_lm = JudgeLM(model, tokenizer, prompt=conversation[0]["content"])
@@ -161,13 +159,13 @@ class PAIRAttack(Attack):
             # Get target responses
             times.append(time.time() - t1)
             t1 = time.time()
-            target_response_payload = target_lm.get_response(adv_prompt_list)
-            if len(target_response_payload) == 3:
-                target_response_list, model_input_tokens, flops_target = target_response_payload
-                target_raw_list = None
-                target_meta_list = None
-            else:
-                target_response_list, model_input_tokens, flops_target, target_raw_list, target_meta_list = target_response_payload
+            (
+                target_response_list,
+                model_input_tokens,
+                flops_target,
+                target_raw_list,
+                target_meta_list,
+            ) = target_lm.get_response(adv_prompt_list)
 
             token_list.extend(model_input_tokens)
             completions.append(target_response_list)
@@ -187,30 +185,17 @@ class PAIRAttack(Attack):
                 for target_response, score in zip(target_response_list, judge_scores)
             ]
         if self.config.generation_config.num_return_sequences > 1:
-            if use_runtime_defense:
-                additional_result = target_lm.runtime_generator.generate(
-                    attacks,
-                    max_new_tokens=self.config.generation_config.max_new_tokens,
-                    temperature=self.config.generation_config.temperature,
-                    top_p=self.config.generation_config.top_p,
-                    top_k=self.config.generation_config.top_k,
-                    # we already have the first completion, so we only need to generate the rest
-                    num_return_sequences=self.config.generation_config.num_return_sequences-1,
-                    initial_batch_size=len(attacks),
-                )
-                additional_completions = additional_result.gen
-            else:
-                additional_completions = generate_ragged_batched(
-                    model=target_lm.model,
-                    tokenizer=target_lm.tokenizer,
-                    token_list=token_list,
-                    max_new_tokens=self.config.generation_config.max_new_tokens,
-                    temperature=self.config.generation_config.temperature,
-                    top_p=self.config.generation_config.top_p,
-                    top_k=self.config.generation_config.top_k,
-                    # we already have the first completion, so we only need to generate the rest
-                    num_return_sequences=self.config.generation_config.num_return_sequences-1,
-                )
+            additional_result = target_lm.defense.generate(
+                attacks,
+                max_new_tokens=self.config.generation_config.max_new_tokens,
+                temperature=self.config.generation_config.temperature,
+                top_p=self.config.generation_config.top_p,
+                top_k=self.config.generation_config.top_k,
+                # We already have the first completion, so we only need to generate the rest.
+                num_return_sequences=self.config.generation_config.num_return_sequences - 1,
+                initial_batch_size=len(attacks),
+            )
+            additional_completions = additional_result.gen
             extras_by_step = [[] for _ in range(len(completions))]
             for flat_idx, new_completions in enumerate(additional_completions):
                 step_idx = flat_idx // self.config.num_streams
@@ -418,62 +403,34 @@ class TargetLM:
         model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
         cfg,
-        runtime_generator=None,
+        defense: Defense,
     ):
         self.model = model
         self.tokenizer = tokenizer
         self.temperature = cfg.temperature
         self.max_new_tokens = cfg.max_new_tokens
         self.top_p = cfg.top_p
-        self.runtime_generator = runtime_generator
+        self.defense: Defense = defense
 
     def get_response(self, conversations: list[Conversation]) -> tuple[list[str], list[torch.Tensor], int, list[str] | None, list[dict] | None]:
-        token_list = []
-        for conversation in conversations:
-            token_list.append(torch.cat(prepare_conversation(self.tokenizer, conversation)[0][:-1]))
-
-        if self.runtime_generator is not None:
-            generation_result = self.runtime_generator.generate(
-                conversations,
-                max_new_tokens=self.max_new_tokens,
-                temperature=self.temperature,
-                top_p=self.top_p,
-                num_return_sequences=1,
-                initial_batch_size=len(conversations),
-            )
-            outputs_list = generation_result.gen0
-            raw_outputs = [row[0] for row in generation_result.raw_gen] if generation_result.raw_gen is not None else None
-            defense_meta = (
-                [row[0].get("metadata", row[0]) for row in generation_result.defense_decisions]
-                if generation_result.defense_decisions is not None
-                else None
-            )
-            generation_input_ids = generation_result.input_ids
-            if generation_input_ids is None:
-                raise ValueError(
-                    "PAIR TargetLM requires `generation_result.input_ids` from the runtime generator "
-                    "(expected for local/defended-local generators)."
-                )
-            token_list = [torch.tensor(ids, dtype=torch.long) for ids in generation_input_ids]
-            output_token_count = sum(
-                len(self.tokenizer(o, add_special_tokens=False).input_ids) for o in outputs_list
-            )
-            flops = get_flops(self.model, sum(len(t) for t in token_list), output_token_count, type="forward")
-            return outputs_list, token_list, flops, raw_outputs, defense_meta
-
-        outputs_tokens = generate_ragged_batched(
-            model=self.model,
-            tokenizer=self.tokenizer,
-            token_list=token_list,
+        generation_result = self.defense.generate(
+            conversations,
             max_new_tokens=self.max_new_tokens,
             temperature=self.temperature,
             top_p=self.top_p,
-            return_tokens=True,
+            num_return_sequences=1,
+            initial_batch_size=len(conversations),
         )
-        flops = get_flops(self.model, sum(len(t) for t in token_list), sum(len(o[0]) if len(o) > 0 else 0 for o in outputs_tokens), type="forward")
-        outputs_list = [self.tokenizer.decode(o[0]) for o in outputs_tokens]  # only care about a single completion
-
-        return outputs_list, token_list, flops, None, None
+        outputs_list = generation_result.gen0
+        raw_outputs = generation_result.raw0()
+        defense_meta = generation_result.defense_metadata0()
+        generation_input_ids = generation_result.require_input_ids("PAIR TargetLM", expected_len=len(conversations))
+        token_list = [torch.tensor(ids, dtype=torch.long) for ids in generation_input_ids]
+        output_token_count = sum(
+            len(self.tokenizer(o, add_special_tokens=False).input_ids) for o in outputs_list
+        )
+        flops = get_flops(self.model, sum(len(t) for t in token_list), output_token_count, type="forward")
+        return outputs_list, token_list, flops, raw_outputs, defense_meta
 
 
 class JudgeLM:

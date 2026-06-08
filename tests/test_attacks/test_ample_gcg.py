@@ -1,6 +1,7 @@
 from omegaconf import OmegaConf
 
 from adversariallm.attacks.ample_gcg import AmpleGCGAttack
+from adversariallm.defenses import create_defense
 from adversariallm.io_utils import load_model_and_tokenizer
 
 
@@ -58,7 +59,7 @@ def test_ample_gcg_attack():
             "trust_remote_code": True
         })
         model, tokenizer = load_model_and_tokenizer(model_config)
-        result = attack.run(model, tokenizer, dataset)
+        result = attack.run(model, tokenizer, dataset, create_defense(None, model=model, tokenizer=tokenizer))
 
         # Check that the result has expected structure
         assert result is not None

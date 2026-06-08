@@ -90,7 +90,8 @@ class PGDDiscreteAttack(Attack):
         super().__init__(config)
         logging.warning("This implementation is WIP. To reproduce Geisler et al. (2024), use their official code.")
 
-    def run(self, model: torch.nn.Module, tokenizer, dataset) -> AttackResult:
+    def run(self, model: torch.nn.Module, tokenizer, dataset, _defense) -> AttackResult:
+        # Runtime defenses are not supported by discrete PGD yet.
         x, attack_masks, target_masks, conversations = self._prepare_dataset(dataset, tokenizer)
         logging.info(f"Prepared {len(conversations)} conversations for attack")
 

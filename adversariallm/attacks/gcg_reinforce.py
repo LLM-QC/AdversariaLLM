@@ -113,7 +113,9 @@ class GCGReinforceAttack(Attack[GCGReinforceConfig]):
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizer,
         dataset: PromptDataset,
+        _defense,
     ) -> AttackResult:
+        # Runtime defenses are not supported by GCG-Reinforce yet.
         self.judge = Judge.from_name(self.config.judge_model_id)
         self.model = model
         self.tokenizer = tokenizer  # Store tokenizer as instance variable

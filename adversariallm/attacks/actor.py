@@ -24,7 +24,7 @@ from beartype.typing import Optional
 from dotenv import load_dotenv
 
 from ..io_utils import load_model_and_tokenizer
-from ..defenses import create_defended_text_generator
+from ..defenses import Defense
 from ..lm_utils import (
     APIRetryOverrides,
     APITextGenerator,
@@ -133,12 +133,13 @@ class ActorAttack(Attack[ActorAttackResult]):
         model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
         dataset: torch.utils.data.Dataset,
+        defense: Defense,
     ) -> ActorAttackResult:
         load_dotenv(override=True)
         base_url = os.getenv("BASE_URL_GPT")
         logging.info(f"BASE_URL_GPT: {repr(base_url)}")
 
-        target_model, attack_model, judge = self.setup_models(model, tokenizer)
+        target_model, attack_model, judge = self.setup_models(model, tokenizer, defense)
 
         data = list(dataset)
         org_queries = [msg["content"] for msg, _ in data]
@@ -166,12 +167,12 @@ class ActorAttack(Attack[ActorAttackResult]):
         logging.info("Finished actor attack")
         return res
 
-    def setup_models(self, model, tokenizer) -> tuple[TextGenerator, TextGenerator, "Judge"]:
-        # target
-        target_generate_kwargs = {**self.target_generation_config, "filters": self.free_gen_repetition_filters}
-        target = LocalTextGenerator(model, tokenizer, default_generate_kwargs=target_generate_kwargs)
-        target = create_defended_text_generator(getattr(self.config, "defense", None), base_generator=target)
-
+    def setup_models(
+        self,
+        model,
+        tokenizer,
+        defense: Defense,
+    ) -> tuple[Defense, TextGenerator, "Judge"]:
         # attacker
         if self.attack_model_config.use_api:
             attack_generate_kwargs = {**self.attack_generation_config}
@@ -215,7 +216,7 @@ class ActorAttack(Attack[ActorAttackResult]):
                 developer_name=developer_name,
             )
 
-        return target, attacker, judge
+        return defense, attacker, judge
 
     def generate_attack_strats(self, attack_model: TextGenerator, org_queries: list[str]) -> dict:
         # break down the harmful instruction into central harm, how to deliver the harm and further details
@@ -455,7 +456,7 @@ class ActorAttack(Attack[ActorAttackResult]):
 
     def unroll_multi_turn(
         self,
-        target_model: TextGenerator,
+        target_model: Defense,
         attack_model: TextGenerator,
         judge: "Judge",
         instructions: list[str],
@@ -502,7 +503,13 @@ class ActorAttack(Attack[ActorAttackResult]):
             active_turn_queries = [q[turn_idx] for q in active_queries]  # queries for the current turn
 
             # Generate target responses
-            active_responses, active_convs = generate_with_conv(target_model, active_convs, active_turn_queries)
+            active_responses, active_convs = generate_with_conv(
+                target_model,
+                active_convs,
+                active_turn_queries,
+                filters=self.free_gen_repetition_filters,
+                **self.target_generation_config,
+            )
 
             # Change query if judge detects a refusal
             if self.dynamic_modify:
@@ -521,7 +528,13 @@ class ActorAttack(Attack[ActorAttackResult]):
                     changed_convs = select_active_subset(active_convs, changed_query_mask)
                     logging.info(f"Regenerating {sum(changed_query_mask)}/{len(changed_query_mask)} queries")
 
-                    _, updated_convs = generate_with_conv(target_model, changed_convs, changed_queries)
+                    _, updated_convs = generate_with_conv(
+                        target_model,
+                        changed_convs,
+                        changed_queries,
+                        filters=self.free_gen_repetition_filters,
+                        **self.target_generation_config,
+                    )
 
                     active_convs = update_masked_subset(active_convs, changed_query_mask, updated_convs)
 
@@ -565,7 +578,7 @@ class ActorAttack(Attack[ActorAttackResult]):
 
     def summary(
         self,
-        target_model: TextGenerator,
+        target_model: Defense,
         judge: "Judge",
         instructions: list[str],
         query_details_list: list[dict[str, str]],
@@ -613,7 +626,14 @@ class ActorAttack(Attack[ActorAttackResult]):
         logging.info(f"Starting summary for {len(flat_convs)} conversations")
 
         # generate new responses
-        responses, flat_convs = safe_generate_with_conv(target_model, flat_convs, summary_queries, context="summary")
+        responses, flat_convs = safe_generate_with_conv(
+            target_model,
+            flat_convs,
+            summary_queries,
+            filters=self.free_gen_repetition_filters,
+            context="summary",
+            generate_kwargs=dict(self.target_generation_config),
+        )
 
         logging.info(f"Judging {len(responses)} responses")
         score_reason_list = judge.judge(instructions_large, responses)
@@ -640,7 +660,12 @@ class ActorAttack(Attack[ActorAttackResult]):
             )
 
             new_responses, new_convs = safe_generate_with_conv(
-                target_model, imperfect_convs, queries_of_imperfect_convs, context="summary_type_only"
+                target_model,
+                imperfect_convs,
+                queries_of_imperfect_convs,
+                filters=self.free_gen_repetition_filters,
+                context="summary_type_only",
+                generate_kwargs=dict(self.target_generation_config),
             )
 
             logging.info(f"Judging {len(new_responses)} new responses")
@@ -668,7 +693,7 @@ class ActorAttack(Attack[ActorAttackResult]):
 
     def attack_multi_turn(
         self,
-        target_model: TextGenerator,
+        target_model: Defense,
         attack_model: TextGenerator,
         attack_strat: dict,
         judge: "Judge",

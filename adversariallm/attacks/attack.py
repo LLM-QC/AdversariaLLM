@@ -179,23 +179,17 @@ class Attack(Generic[AttRes]):
             case _:
                 raise ValueError(f"Unknown attack: {name}")
 
-    @classmethod
-    def supports_runtime_text_defense(cls, name: str) -> bool:
-        """Whether attack can operate against a black-box TextGenerator wrapper."""
-        return name in {"actor", "crescendo", "inpainting", "bon", "jailbreak_r1", "direct", "pair", "ample_gcg"}
-
-    @classmethod
-    def required_defense_capabilities(cls, name: str) -> set[str]:
-        """Capabilities a runtime defense must provide for this attack."""
-        if name in {"actor", "crescendo", "inpainting"}:
-            return {"black_box_generation"}
-        return set()
-
     @abstractmethod
     def run(
         self,
         model: transformers.PreTrainedModel,
         tokenizer: transformers.PreTrainedTokenizerBase,
         dataset: PromptDataset,
+        defense: Any,
     ) -> AttRes:
+        """Run the attack against the target model through the supplied defense.
+
+        Registry validation ensures attacks without runtime-defense support only
+        receive the no-defense implementation.
+        """
         raise NotImplementedError

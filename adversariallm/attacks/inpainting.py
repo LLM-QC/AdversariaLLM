@@ -10,8 +10,8 @@
 import copy
 import logging
 import time
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pandas as pd
 import torch
@@ -19,9 +19,9 @@ import transformers
 from beartype.typing import Optional
 from huggingface_hub import hf_hub_download
 
-from ..defenses import create_defended_text_generator
+from ..defenses import Defense
 from ..dataset import PromptDataset
-from ..lm_utils import LocalTextGenerator, get_losses_batched, prepare_conversation
+from ..lm_utils import prepare_conversation
 from ..types import Conversation
 from .attack import Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult
 
@@ -95,6 +95,7 @@ class InpaintingAttack(Attack):
         model: transformers.PreTrainedModel,
         tokenizer: transformers.PreTrainedTokenizerBase,
         dataset: PromptDataset,
+        defense: Defense,
     ) -> AttackResult:
         """Run the Inpainting attack on the given dataset.
         Parameters:
@@ -102,15 +103,13 @@ class InpaintingAttack(Attack):
             model: The model to attack.
             tokenizer: The tokenizer to use.
             dataset: The dataset to attack.
+            defense: Runtime interface for target-model generation and loss.
 
         Returns:
         -------
             AttackResult: The result of the attack
         """
         t0 = time.time()
-        runtime_defense_cfg = getattr(self.config, "defense", None)
-        use_runtime_defense = bool(runtime_defense_cfg and runtime_defense_cfg.get("type", "none") != "none")
-
         # --- 1. Prepare Inputs ---
         generation_conversations: list[Conversation] = []
         original_conversations: list[Conversation] = []
@@ -138,54 +137,28 @@ class InpaintingAttack(Attack):
                 prompt_flat_tokens = [t for turn_tokens in prompt_token_tensors for t in turn_tokens]
                 generation_prompt_token_tensors_list.append(torch.cat(prompt_flat_tokens, dim=0))
 
-                if not use_runtime_defense:
-                    token_tensors = prepare_conversation(tokenizer, conversation)
-                    flat_tokens = [t for turn_tokens in token_tensors for t in turn_tokens]
-                    # Concatenate all turns for the full input/target context
-                    loss_full_token_tensors_list.append(torch.cat(flat_tokens, dim=0))
+                token_tensors = prepare_conversation(tokenizer, conversation)
+                flat_tokens = [t for turn_tokens in token_tensors for t in turn_tokens]
+                # Concatenate all turns for the full input/target context.
+                loss_full_token_tensors_list.append(torch.cat(flat_tokens, dim=0))
 
         B = len(generation_conversations)
-        runtime_generator = LocalTextGenerator(model, tokenizer)
-        runtime_generator = create_defended_text_generator(runtime_defense_cfg, base_generator=runtime_generator)
 
         # --- 2. Calculate Losses ---
         loss_time_total = 0.0
-        if use_runtime_defense:
-            logging.info("Runtime defense enabled for inpainting; skipping internal loss computation.")
-            instance_losses = [None] * B
-        else:
-            t_start_loss = time.time()
-            # We need targets shifted by one position for standard next-token prediction loss
-            shifted_target_tensors_list = [t.roll(-1, 0) for t in loss_full_token_tensors_list]
-
-            # Calculate loss for the full sequences
-            with torch.no_grad():
-                all_losses_per_token = get_losses_batched(
-                    model,
-                    targets=shifted_target_tensors_list,
-                    token_list=loss_full_token_tensors_list,
-                    initial_batch_size=B,
-                    verbose=True,
-                )
-
-            # Extract average loss *only* over the target tokens for each instance
-            instance_losses = []
-            for i in range(B):
-                full_len = loss_full_token_tensors_list[i].size(0)
-                prompt_len = generation_prompt_token_tensors_list[i].size(0)
-                target_token_losses = all_losses_per_token[i][prompt_len - 1 : full_len - 1]
-                if target_token_losses.numel() > 0:
-                    avg_loss = target_token_losses.mean().item()
-                else:
-                    avg_loss = None
-                instance_losses.append(avg_loss)
-
-            t_end_loss = time.time()
-            loss_time_total = t_end_loss - t_start_loss
+        t_start_loss = time.time()
+        instance_losses = defense.loss(
+            loss_full_token_tensors_list,
+            generation_prompt_token_tensors_list,
+            initial_batch_size=B,
+            verbose=True,
+        )
+        t_end_loss = time.time()
+        loss_time_total = t_end_loss - t_start_loss
 
         # --- 3. Generate Completions ---
         t_start_gen = time.time()
-        generation_result = runtime_generator.generate(
+        generation_result = defense.generate(
             generation_conversations,
             max_new_tokens=self.config.generation_config.max_new_tokens,
             temperature=self.config.generation_config.temperature,
@@ -196,19 +169,7 @@ class InpaintingAttack(Attack):
             verbose=True,
         )
         completions = generation_result.gen
-        completions_raw: list[list[str]] | None = generation_result.raw_gen
-        defense_decisions: list[list[dict]] | None = generation_result.defense_decisions
-        generation_input_ids = generation_result.input_ids
-        if generation_input_ids is None:
-            raise ValueError(
-                "Inpainting requires `generation_result.input_ids` from the runtime generator "
-                "(expected for local/defended-local generators)."
-            )
-        if len(generation_input_ids) != B:
-            raise ValueError(
-                "Inpainting received mismatched `generation_result.input_ids` length: "
-                f"expected {B}, got {len(generation_input_ids)}."
-            )
+        generation_input_ids = generation_result.require_input_ids("Inpainting", expected_len=B)
         t_end_gen = time.time()
         gen_time_total = t_end_gen - t_start_gen
 
@@ -231,15 +192,13 @@ class InpaintingAttack(Attack):
                 step_result = AttackStepResult(
                     step=j,
                     model_completions=model_completions,
-                    model_completions_raw=completions_raw[idx] if completions_raw is not None else None,
+                    model_completions_raw=generation_result.raw_for(idx),
                     time_taken=(t1 - t0) / B,
                     loss=loss,
                     flops=0,
                     model_input=model_input,
                     model_input_tokens=model_input_tokens,
-                    defense_metadata=[d.get("metadata", d) for d in defense_decisions[idx]]
-                    if defense_decisions is not None
-                    else None,
+                    defense_metadata=generation_result.defense_metadata_for(idx),
                 )
                 step_results.append(step_result)
 
