@@ -23,6 +23,7 @@ import transformers
 from beartype import beartype
 from dotenv import load_dotenv
 
+from ..defenses import create_defended_text_generator
 from ..io_utils import load_model_and_tokenizer
 from ..lm_utils import (
     APITextGenerator,
@@ -152,6 +153,7 @@ class CrescendoAttack(Attack[CrescendoAttackResult]):
         # target
         target_generate_kwargs = {**self.target_generation_config, "filters": self.free_gen_repetition_filters}
         target = LocalTextGenerator(model, tokenizer, default_generate_kwargs=target_generate_kwargs)
+        target = create_defended_text_generator(getattr(self.config, "defense", None), base_generator=target)
 
         # attacker
         if self.attack_model_config.use_api:
@@ -509,9 +511,11 @@ def create_attack_step_results_from_convs(convs: list[Conversation]) -> list[lis
                 step = AttackStepResult(
                     step=len(steps),
                     model_completions=[message["content"]],
+                    model_completions_raw=[message["raw_content"]] if "raw_content" in message else None,
                     scores={"crescendo_judge": {"score": [float(message["score"])]}},
                     model_input=[{k: d[k] for k in ("role", "content") if k in d} for d in conv[:j]],
                     model_input_tokens=message.get("input_ids", None),
+                    defense_metadata=[message["defense_metadata"]] if "defense_metadata" in message else None,
                 )
                 steps.append(step)
         samples_list.append(steps)

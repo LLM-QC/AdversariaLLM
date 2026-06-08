@@ -2,6 +2,7 @@ defaults:
   - attacks: attacks
   - datasets: datasets
   - models: models
+  - defenses: defenses
   - paths
   - override hydra/launcher: a100h100.yaml
   - _self_
@@ -33,3 +34,4 @@ generation_config:
 attack: null
 dataset: adv_behaviors
 model: null
+defense: none

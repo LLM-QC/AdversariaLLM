@@ -63,6 +63,7 @@ ample_gcg:
   generation_config: ${attacks._default.generation_config}
   seed: ${attacks._default.seed}
   num_steps: 200
+  offload_target_model_to_cpu: true
   prompter_lm:
     id: osunlp/AmpleGCG-llama2-sourced-llama2-7b-chat
     tokenizer_id: osunlp/AmpleGCG-llama2-sourced-llama2-7b-chat

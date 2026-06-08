@@ -24,6 +24,7 @@ from beartype.typing import Optional
 from dotenv import load_dotenv
 
 from ..io_utils import load_model_and_tokenizer
+from ..defenses import create_defended_text_generator
 from ..lm_utils import (
     APIRetryOverrides,
     APITextGenerator,
@@ -169,6 +170,7 @@ class ActorAttack(Attack[ActorAttackResult]):
         # target
         target_generate_kwargs = {**self.target_generation_config, "filters": self.free_gen_repetition_filters}
         target = LocalTextGenerator(model, tokenizer, default_generate_kwargs=target_generate_kwargs)
+        target = create_defended_text_generator(getattr(self.config, "defense", None), base_generator=target)
 
         # attacker
         if self.attack_model_config.use_api:
@@ -719,11 +721,13 @@ class ActorAttack(Attack[ActorAttackResult]):
                         step = AttackStepResult(
                             step=len(steps),
                             model_completions=[message["content"]],
+                            model_completions_raw=[message["raw_content"]] if "raw_content" in message else None,
                             scores={"actor_judge": {"score": [float(message["score"])]}},
                             model_input=[{k: d[k] for k in ("role", "content") if k in d} for d in conv[:msg_idx]],
                             model_input_tokens=message["input_ids"]
                             if "input_ids" in message
                             else None,  # for the API model this should be None
+                            defense_metadata=[message["defense_metadata"]] if "defense_metadata" in message else None,
                         )
                         steps.append(step)
                 steps_list.append(steps)

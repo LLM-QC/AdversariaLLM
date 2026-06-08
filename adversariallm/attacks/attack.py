@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from abc import abstractmethod
-from typing import Union
+from typing import Any, Union
 
 from torch import Tensor
 import transformers
@@ -30,6 +30,8 @@ class AttackStepResult:
     # The model's completion(s) in response to model_input. We use a list to store
     # multiple completions in case we are using distributional evaluation.
     model_completions: list[str]
+    # Optional raw completions before defense transformation.
+    model_completions_raw: Optional[list[str]] = None
 
     # Judge scores - should be a dict of judge name -> dict[str, list] mapping type to list of scores
     scores: dict[str, dict[str, list[float]]] = field(default_factory=dict)
@@ -55,6 +57,9 @@ class AttackStepResult:
     model_input_tokens: Optional[list[int]] = None
 
     model_input_embeddings: Optional[Union[Tensor, str]] = None
+
+    # Optional defense metadata (kept optional for backward compatibility).
+    defense_metadata: Optional[list[dict[str, Any]]] = None
 
 
 @beartype
@@ -173,6 +178,18 @@ class Attack(Generic[AttRes]):
                 return RandomSearchAttack
             case _:
                 raise ValueError(f"Unknown attack: {name}")
+
+    @classmethod
+    def supports_runtime_text_defense(cls, name: str) -> bool:
+        """Whether attack can operate against a black-box TextGenerator wrapper."""
+        return name in {"actor", "crescendo", "inpainting", "bon", "jailbreak_r1", "direct", "pair", "ample_gcg"}
+
+    @classmethod
+    def required_defense_capabilities(cls, name: str) -> set[str]:
+        """Capabilities a runtime defense must provide for this attack."""
+        if name in {"actor", "crescendo", "inpainting"}:
+            return {"black_box_generation"}
+        return set()
 
     @abstractmethod
     def run(

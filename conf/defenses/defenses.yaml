@@ -1,0 +1,22 @@
+none:
+  name: none
+  type: none
+
+polyguard:
+  name: polyguard
+  type: polyguard
+  model:
+    id: ToxicityPrompts/PolyGuard-Qwen-Smol
+    tokenizer_id: ToxicityPrompts/PolyGuard-Qwen-Smol
+    short_name: PolyGuard
+    developer_name: ToxicityPrompts
+    compile: false
+    trust_remote_code: true
+    chat_template: null
+    dtype: bfloat16
+    device: cuda
+    cache_dir: null
+  max_new_tokens: 64
+  batch_size: null
+  overwrite_mode: harmful_content
+  refusal_text: "Sorry, I can't assist you with that."

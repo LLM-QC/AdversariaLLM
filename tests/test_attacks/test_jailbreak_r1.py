@@ -5,6 +5,26 @@ import torch
 
 from adversariallm.attacks.attack import Attack
 from adversariallm.attacks.jailbreak_r1 import JailbreakR1Attack, JailbreakR1Config
+from adversariallm.lm_utils.text_generation import GenerationResult
+
+
+def _patch_runtime_generator(monkeypatch, outputs: list[str]):
+    class _FakeLocalTextGenerator:
+        def __init__(self, _model, _tokenizer):
+            pass
+
+        def generate(self, convs, **kwargs):
+            assert len(convs) == len(outputs)
+            return GenerationResult(
+                gen=[[out] for out in outputs],
+                input_ids=[[1, 2, 3] for _ in outputs],
+            )
+
+    monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.LocalTextGenerator", _FakeLocalTextGenerator)
+    monkeypatch.setattr(
+        "adversariallm.attacks.jailbreak_r1.create_defended_text_generator",
+        lambda cfg, base_generator: base_generator,
+    )
 
 
 def test_attack_registry_includes_jailbreak_r1():
@@ -79,6 +99,7 @@ def test_jailbreak_r1_run_smoke(monkeypatch):
     monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.generate_ragged_batched", _mock_generate_ragged_batched)
     monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.prepare_conversation", _mock_prepare_conversation)
     monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.load_model_and_tokenizer", _mock_load_model_and_tokenizer)
+    _patch_runtime_generator(monkeypatch, ["completion-step-0", "completion-step-1"])
 
     cfg = JailbreakR1Config(num_steps=2, parse_retries=2)
     attack = JailbreakR1Attack(cfg)
@@ -139,6 +160,7 @@ def test_jailbreak_r1_allow_untagged_fallback(monkeypatch):
     )
     monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.generate_ragged_batched", _mock_generate_ragged_batched)
     monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.prepare_conversation", _mock_prepare_conversation)
+    _patch_runtime_generator(monkeypatch, ["target completion"])
 
     cfg = JailbreakR1Config(num_steps=1, parse_retries=1, allow_untagged_fallback=True)
     attack = JailbreakR1Attack(cfg)
@@ -183,6 +205,7 @@ def test_jailbreak_r1_reads_cache_and_skips_attacker_loading(monkeypatch, tmp_pa
         "adversariallm.attacks.jailbreak_r1.load_model_and_tokenizer",
         lambda cfg: (_ for _ in ()).throw(AssertionError("attacker model should not be loaded in cache read mode")),
     )
+    _patch_runtime_generator(monkeypatch, ["target completion from cache path"])
 
     cfg = JailbreakR1Config(
         num_steps=1,
@@ -261,6 +284,7 @@ def test_jailbreak_r1_reads_subset_by_behavior_id(monkeypatch, tmp_path):
         "adversariallm.attacks.jailbreak_r1.generate_ragged_batched",
         lambda model, tokenizer, token_list, **kwargs: [["subset completion"]],
     )
+    _patch_runtime_generator(monkeypatch, ["subset completion"])
 
     cfg = JailbreakR1Config(
         num_steps=1,
@@ -352,6 +376,7 @@ def test_jailbreak_r1_frees_attacker_vram_when_models_differ(monkeypatch, tmp_pa
         "adversariallm.attacks.jailbreak_r1.generate_ragged_batched",
         lambda model, tokenizer, token_list, **kwargs: [["target completion"]],
     )
+    _patch_runtime_generator(monkeypatch, ["target completion"])
 
     cfg = JailbreakR1Config(
         num_steps=1,

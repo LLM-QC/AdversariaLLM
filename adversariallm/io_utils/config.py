@@ -16,9 +16,11 @@ class RunConfig:
     model: str
     dataset: str
     attack: str
+    defense: str | None
     model_params: dict
     dataset_params: dict
     attack_params: dict
+    defense_params: dict | None = None
 
 
 def filter_config(run_config: RunConfig, dset_len: int, overwrite: bool = False) -> RunConfig | None:

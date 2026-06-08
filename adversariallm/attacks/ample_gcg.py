@@ -7,6 +7,7 @@
   year={2024}
 }
 """
+import copy
 import logging
 import sys
 import time
@@ -18,8 +19,9 @@ import torch.nn as nn
 from tqdm import tqdm, trange
 from transformers import GenerationConfig as HuggingFaceGenerationConfig
 
+from ..defenses import create_defended_text_generator
 from ..io_utils import free_vram, load_model_and_tokenizer
-from ..lm_utils import generate_ragged_batched, get_losses_batched, prepare_conversation
+from ..lm_utils import LocalTextGenerator, get_losses_batched, prepare_conversation
 
 from .attack import Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult
 
@@ -48,6 +50,7 @@ class AmpleGCGConfig:
     generation_config: GenerationConfig = field(default_factory=GenerationConfig)
     seed: int = 0
     num_steps: int = 200
+    offload_target_model_to_cpu: bool = True
     prompter_lm: PrompterLMConfig = field(default_factory=PrompterLMConfig)
 
 
@@ -58,51 +61,77 @@ class AmpleGCGAttack(Attack):
     @torch.no_grad
     def run(self, model: torch.nn.Module, tokenizer, dataset) -> AttackResult:
         runs = []
+        runtime_defense_cfg = getattr(self.config, "defense", None)
+        use_runtime_defense = bool(runtime_defense_cfg and runtime_defense_cfg.get("type", "none") != "none")
+        runtime_generator = LocalTextGenerator(model, tokenizer)
+        runtime_generator = create_defended_text_generator(runtime_defense_cfg, base_generator=runtime_generator)
+
         for conversation in tqdm(dataset, file=sys.stdout):
             assert len(conversation) == 2, "Current AmpleGCG only supports single-turn conversations"
             msg = conversation[0]["content"]
             target = conversation[1]["content"]
-            # Temporarily move target model to cpu
+            # Optionally move target model to CPU while generating attack prompts.
             device = model.device
-            model.cpu()
-            free_vram()
+            if self.config.offload_target_model_to_cpu:
+                model.cpu()
+                free_vram()
             t0 = time.time()
             batch_attacks = self.get_attack_prompts(f"### Query:{msg} ### Prompt:")
-            model.to(device)
+            if self.config.offload_target_model_to_cpu:
+                model.to(device)
             attack_conversations = [
                 [{"role": "user", "content": f"{msg}{attack}"}, {"role": "assistant", "content": target}]
                 for attack in batch_attacks
             ]
             logging.info("Prepared attack conversations")
-            batch_losses = self.get_losses(attack_conversations, model, tokenizer)
-            logging.info("Calculated losses")
-            token_list = [
-                torch.cat(prepare_conversation(tokenizer, attack_conversation)[0][:-1])
-                for attack_conversation in attack_conversations
-            ]
-            logging.info("Prepared token lists")
-            batch_completions = generate_ragged_batched(
-                model,
-                tokenizer,
-                token_list=token_list,
+            if use_runtime_defense:
+                logging.info("Runtime defense enabled for ample_gcg; skipping internal loss computation.")
+                batch_losses = [None] * len(attack_conversations)
+            else:
+                batch_losses = self.get_losses(attack_conversations, model, tokenizer)
+                logging.info("Calculated losses")
+
+            generation_conversations = copy.deepcopy(attack_conversations)
+            for i in range(len(generation_conversations)):
+                generation_conversations[i][-1]["content"] = ""
+
+            generation_result = runtime_generator.generate(
+                generation_conversations,
                 max_new_tokens=self.config.generation_config.max_new_tokens,
                 temperature=self.config.generation_config.temperature,
                 top_p=self.config.generation_config.top_p,
                 top_k=self.config.generation_config.top_k,
                 num_return_sequences=self.config.generation_config.num_return_sequences,
+                initial_batch_size=len(generation_conversations) * self.config.generation_config.num_return_sequences,
             )
+            batch_completions = generation_result.gen
+            batch_completions_raw = generation_result.raw_gen
+            defense_decisions = generation_result.defense_decisions
+            generation_input_ids = generation_result.input_ids
+            if generation_input_ids is None:
+                raise ValueError(
+                    "AmpleGCG requires `generation_result.input_ids` from the runtime generator "
+                    "(expected for local/defended-local generators)."
+                )
+            if len(generation_input_ids) != len(generation_conversations):
+                raise ValueError(
+                    "AmpleGCG received mismatched `generation_result.input_ids` length: "
+                    f"expected {len(generation_conversations)}, got {len(generation_input_ids)}."
+                )
             logging.info("Generated completions")
-            for i in range(len(attack_conversations)):
-                attack_conversations[i][-1]["content"] = ""
             t1 = time.time()
             step_results = [
                 AttackStepResult(
                     step=i,
                     model_completions=batch_completions[i],
+                    model_completions_raw=batch_completions_raw[i] if batch_completions_raw is not None else None,
                     time_taken=(t1 - t0) / len(batch_attacks),
                     loss=batch_losses[i],
-                    model_input=attack_conversations[i],
-                    model_input_tokens=token_list[i].tolist()
+                    model_input=generation_conversations[i],
+                    model_input_tokens=generation_input_ids[i],
+                    defense_metadata=[d.get("metadata", d) for d in defense_decisions[i]]
+                    if defense_decisions is not None
+                    else None,
                 )
                 for i in range(len(batch_attacks))
             ]

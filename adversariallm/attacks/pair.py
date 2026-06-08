@@ -25,8 +25,9 @@ from tqdm import trange
 
 from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
                      SingleAttackRunResult)
+from ..defenses import create_defended_text_generator
 from ..io_utils import load_model_and_tokenizer
-from ..lm_utils import generate_ragged_batched, get_flops, prepare_conversation
+from ..lm_utils import LocalTextGenerator, generate_ragged_batched, get_flops, prepare_conversation
 from ..types import Conversation
 
 
@@ -106,7 +107,14 @@ class PAIRAttack(Attack):
         else:
             attack_model, attack_tokenizer = load_model_and_tokenizer(self.config.attack_model)
 
-        target_lm = TargetLM(model, tokenizer, self.config.target_model)
+        runtime_defense_cfg = getattr(self.config, "defense", None)
+        use_runtime_defense = bool(runtime_defense_cfg and runtime_defense_cfg.get("type", "none") != "none")
+        runtime_generator = None
+        if use_runtime_defense:
+            runtime_generator = LocalTextGenerator(model, tokenizer)
+            runtime_generator = create_defended_text_generator(runtime_defense_cfg, base_generator=runtime_generator)
+
+        target_lm = TargetLM(model, tokenizer, self.config.target_model, runtime_generator=runtime_generator)
         attack_lm = AttackLM(attack_model, attack_tokenizer, self.config.attack_model)
         if self.config.judge_model.id is None:
             judge_lm = JudgeLM(model, tokenizer, prompt=conversation[0]["content"])
@@ -128,8 +136,10 @@ class PAIRAttack(Attack):
 
         attacks: list[Conversation] = []
         completions: list[list[str]] = []
+        completions_raw: list[list[str] | None] = []
+        completion_defense_meta: list[list[dict] | None] = []
         times = []
-        token_list: list[list[int]] = []
+        token_list: list[torch.Tensor] = []
         flops_list: list[int] = []
         flops_judge = 0
         # Begin PAIR
@@ -151,10 +161,18 @@ class PAIRAttack(Attack):
             # Get target responses
             times.append(time.time() - t1)
             t1 = time.time()
-            target_response_list, model_input_tokens, flops_target = target_lm.get_response(adv_prompt_list)
+            target_response_payload = target_lm.get_response(adv_prompt_list)
+            if len(target_response_payload) == 3:
+                target_response_list, model_input_tokens, flops_target = target_response_payload
+                target_raw_list = None
+                target_meta_list = None
+            else:
+                target_response_list, model_input_tokens, flops_target, target_raw_list, target_meta_list = target_response_payload
 
             token_list.extend(model_input_tokens)
             completions.append(target_response_list)
+            completions_raw.append(target_raw_list)
+            completion_defense_meta.append(target_meta_list)
             flops_list.append(flops_attack + flops_target + flops_judge)
             logging.info("Finished getting target responses.")
 
@@ -169,17 +187,30 @@ class PAIRAttack(Attack):
                 for target_response, score in zip(target_response_list, judge_scores)
             ]
         if self.config.generation_config.num_return_sequences > 1:
-            additional_completions = generate_ragged_batched(
-                model=target_lm.model,
-                tokenizer=target_lm.tokenizer,
-                token_list=token_list,
-                max_new_tokens=self.config.generation_config.max_new_tokens,
-                temperature=self.config.generation_config.temperature,
-                top_p=self.config.generation_config.top_p,
-                top_k=self.config.generation_config.top_k,
-                # we already have the first completion, so we only need to generate the rest
-                num_return_sequences=self.config.generation_config.num_return_sequences-1,
-            )
+            if use_runtime_defense:
+                additional_result = target_lm.runtime_generator.generate(
+                    attacks,
+                    max_new_tokens=self.config.generation_config.max_new_tokens,
+                    temperature=self.config.generation_config.temperature,
+                    top_p=self.config.generation_config.top_p,
+                    top_k=self.config.generation_config.top_k,
+                    # we already have the first completion, so we only need to generate the rest
+                    num_return_sequences=self.config.generation_config.num_return_sequences-1,
+                    initial_batch_size=len(attacks),
+                )
+                additional_completions = additional_result.gen
+            else:
+                additional_completions = generate_ragged_batched(
+                    model=target_lm.model,
+                    tokenizer=target_lm.tokenizer,
+                    token_list=token_list,
+                    max_new_tokens=self.config.generation_config.max_new_tokens,
+                    temperature=self.config.generation_config.temperature,
+                    top_p=self.config.generation_config.top_p,
+                    top_k=self.config.generation_config.top_k,
+                    # we already have the first completion, so we only need to generate the rest
+                    num_return_sequences=self.config.generation_config.num_return_sequences-1,
+                )
             extras_by_step = [[] for _ in range(len(completions))]
             for flat_idx, new_completions in enumerate(additional_completions):
                 step_idx = flat_idx // self.config.num_streams
@@ -197,11 +228,13 @@ class PAIRAttack(Attack):
             step = AttackStepResult(
                 step=i,
                 model_completions=completions[i],
+                model_completions_raw=completions_raw[i],
                 time_taken=times[i],
                 loss=None,
                 flops=flops_list[i],
                 model_input=attacks[i],
                 model_input_tokens=token_list[i].tolist(),
+                defense_metadata=completion_defense_meta[i],
             )
             steps.append(step)
         run = SingleAttackRunResult(
@@ -385,19 +418,50 @@ class TargetLM:
         model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
         cfg,
+        runtime_generator=None,
     ):
         self.model = model
         self.tokenizer = tokenizer
         self.temperature = cfg.temperature
         self.max_new_tokens = cfg.max_new_tokens
         self.top_p = cfg.top_p
+        self.runtime_generator = runtime_generator
 
-    def get_response(self, conversations: list[Conversation]) -> tuple[list[str], list[list[int]], int]:
+    def get_response(self, conversations: list[Conversation]) -> tuple[list[str], list[torch.Tensor], int, list[str] | None, list[dict] | None]:
         token_list = []
         for conversation in conversations:
             token_list.append(torch.cat(prepare_conversation(self.tokenizer, conversation)[0][:-1]))
 
-        outputs_list = generate_ragged_batched(
+        if self.runtime_generator is not None:
+            generation_result = self.runtime_generator.generate(
+                conversations,
+                max_new_tokens=self.max_new_tokens,
+                temperature=self.temperature,
+                top_p=self.top_p,
+                num_return_sequences=1,
+                initial_batch_size=len(conversations),
+            )
+            outputs_list = generation_result.gen0
+            raw_outputs = [row[0] for row in generation_result.raw_gen] if generation_result.raw_gen is not None else None
+            defense_meta = (
+                [row[0].get("metadata", row[0]) for row in generation_result.defense_decisions]
+                if generation_result.defense_decisions is not None
+                else None
+            )
+            generation_input_ids = generation_result.input_ids
+            if generation_input_ids is None:
+                raise ValueError(
+                    "PAIR TargetLM requires `generation_result.input_ids` from the runtime generator "
+                    "(expected for local/defended-local generators)."
+                )
+            token_list = [torch.tensor(ids, dtype=torch.long) for ids in generation_input_ids]
+            output_token_count = sum(
+                len(self.tokenizer(o, add_special_tokens=False).input_ids) for o in outputs_list
+            )
+            flops = get_flops(self.model, sum(len(t) for t in token_list), output_token_count, type="forward")
+            return outputs_list, token_list, flops, raw_outputs, defense_meta
+
+        outputs_tokens = generate_ragged_batched(
             model=self.model,
             tokenizer=self.tokenizer,
             token_list=token_list,
@@ -406,10 +470,10 @@ class TargetLM:
             top_p=self.top_p,
             return_tokens=True,
         )
-        flops = get_flops(self.model, sum(len(t) for t in token_list), sum(len(o[0]) if len(o) > 0 else 0 for o in outputs_list), type="forward")
-        outputs_list = [self.tokenizer.decode(o[0]) for o in outputs_list]  # only care about a single completion
+        flops = get_flops(self.model, sum(len(t) for t in token_list), sum(len(o[0]) if len(o) > 0 else 0 for o in outputs_tokens), type="forward")
+        outputs_list = [self.tokenizer.decode(o[0]) for o in outputs_tokens]  # only care about a single completion
 
-        return outputs_list, token_list, flops
+        return outputs_list, token_list, flops, None, None
 
 
 class JudgeLM:

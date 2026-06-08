@@ -110,6 +110,23 @@ The framework supports various adversarial attack algorithms:
 - **Best-of-N** - Jailbreaking with simple string perturbations
 - **Inpainting** - Diffusion-based inpainting attacks (Implemented as transfer attacks)
 
+## Defenses
+
+The framework supports optional runtime defenses configured via `conf/defenses/defenses.yaml`.
+Defenses are implemented as `TextGenerator` objects and are used directly by attacks during generation.
+
+Runtime defense is currently supported by `actor`, `crescendo`, and `inpainting`.
+
+Example runtime defense:
+
+```bash
+python run_attacks.py \
+  attack=actor \
+  model=meta-llama/Meta-Llama-3.1-8B-Instruct \
+  defense=polyguard
+```
+
+Runtime defense is blocked for attacks that require model internals (e.g. gradient-based attacks such as `gcg`).
 
 ## 📊 Evaluation and Judging
 

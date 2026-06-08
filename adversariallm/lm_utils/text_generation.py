@@ -197,7 +197,10 @@ class RetryPolicy:
 @dataclass
 class GenerationResult:
     gen: list[list[str]]  # batch_size x n_choices
-    input_ids: Optional[list[int]] = None
+    # Per-input tokenized ids for local generations; can be None for API backends.
+    input_ids: Optional[list[list[int]]] = None
+    raw_gen: Optional[list[list[str]]] = None
+    defense_decisions: Optional[list[list[dict[str, Any]]]] = None
 
     @property
     def gen0(self) -> list[str]:
@@ -589,8 +592,16 @@ def generate_with_conv(
     res = model.generate(convs, **kwargs)
 
     # Append generated responses to converstations
-    for conv, gen, input_ids in zip(convs, res.gen0, res.input_ids):
-        conv.append({"role": "assistant", "content": gen, "input_ids": input_ids})
+    input_ids_list = res.input_ids or [None] * len(res.gen0)
+    raw_gen0 = [row[0] for row in res.raw_gen] if res.raw_gen is not None else [None] * len(res.gen0)
+    defense_row0 = [row[0] for row in res.defense_decisions] if res.defense_decisions is not None else [None] * len(res.gen0)
+    for conv, gen, input_ids, raw_gen, defense_decision in zip(convs, res.gen0, input_ids_list, raw_gen0, defense_row0):
+        msg: dict[str, Any] = {"role": "assistant", "content": gen, "input_ids": input_ids}
+        if raw_gen is not None:
+            msg["raw_content"] = raw_gen
+        if defense_decision is not None:
+            msg["defense_metadata"] = defense_decision.get("metadata", defense_decision)
+        conv.append(msg)
 
     return res.gen0, convs
 
@@ -733,15 +744,24 @@ def safe_generate_with_conv(
         res = model.generate(convs, filters=filters, **attempt_kwargs)
         responses = res.gen0
         input_ids = res.input_ids or [None] * len(responses)
+        raw_gen0 = [row[0] for row in res.raw_gen] if res.raw_gen is not None else [None] * len(responses)
+        defense_row0 = [row[0] for row in res.defense_decisions] if res.defense_decisions is not None else [None] * len(responses)
     except Exception as exc:
         logging.error(f"Error in {context} generation: {exc}. Prompts: {prompts}, filters: {filters}, kwargs: {attempt_kwargs}")
         logging.info("Falling back to empty responses.")
         responses = [fallback_response] * batch_size
         input_ids = [None] * batch_size
+        raw_gen0 = [None] * batch_size
+        defense_row0 = [None] * batch_size
 
     # Append generated responses to converstations
-    for conv, gen, input_ids in zip(convs, responses, input_ids):
-        conv.append({"role": "assistant", "content": gen, "input_ids": input_ids})
+    for conv, gen, input_ids, raw_gen, defense_decision in zip(convs, responses, input_ids, raw_gen0, defense_row0):
+        msg: dict[str, Any] = {"role": "assistant", "content": gen, "input_ids": input_ids}
+        if raw_gen is not None:
+            msg["raw_content"] = raw_gen
+        if defense_decision is not None:
+            msg["defense_metadata"] = defense_decision.get("metadata", defense_decision)
+        conv.append(msg)
 
     return responses, convs
 

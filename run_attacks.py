@@ -9,6 +9,7 @@ import torch
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from adversariallm.attacks import Attack, AttackResult
+from adversariallm.defenses import get_defense_capabilities
 from adversariallm.dataset import PromptDataset
 from adversariallm.errors import print_exceptions
 from adversariallm.io_utils import RunConfig, filter_config, free_vram, load_model_and_tokenizer, log_attack
@@ -31,6 +32,7 @@ def collect_configs(cfg: DictConfig) -> list[RunConfig]:
     models_to_run = select_configs(cfg.models, cfg.model)
     datasets_to_run = select_configs(cfg.datasets, cfg.dataset)
     attacks_to_run = select_configs(cfg.attacks, cfg.attack)
+    defenses_to_run = select_configs(cfg.defenses, cfg.defense)
 
     all_run_configs = []
     for model, model_params in models_to_run:
@@ -39,17 +41,25 @@ def collect_configs(cfg: DictConfig) -> list[RunConfig]:
             dset_len = len(temp_dataset)
             dataset_params["idx"] = temp_dataset.config_idx
             for attack, attack_params in attacks_to_run:
-                run_config = RunConfig(
-                    model,
-                    dataset,
-                    attack,
-                    model_params,
-                    dataset_params,
-                    attack_params,
-                )
-                run_config = filter_config(run_config, dset_len, overwrite=cfg.overwrite)
-                if run_config is not None:
-                    all_run_configs.append(run_config)
+                for defense, defense_params in defenses_to_run:
+                    attack_params_resolved = OmegaConf.to_container(attack_params, resolve=True)
+                    defense_params_resolved = OmegaConf.to_container(defense_params, resolve=True)
+                    attack_params_with_defense = OmegaConf.create(
+                        {**attack_params_resolved, "defense": defense_params_resolved}
+                    )
+                    run_config = RunConfig(
+                        model,
+                        dataset,
+                        attack,
+                        None if defense == "none" else defense,
+                        model_params,
+                        dataset_params,
+                        attack_params_with_defense,
+                        None if defense == "none" else defense_params_resolved,
+                    )
+                    run_config = filter_config(run_config, dset_len, overwrite=cfg.overwrite)
+                    if run_config is not None:
+                        all_run_configs.append(run_config)
     return all_run_configs
 
 
@@ -57,6 +67,7 @@ def run_attacks(all_run_configs: list[RunConfig], cfg: DictConfig, date_time_str
     last_model = None
     last_dataset = None
     last_attack = None
+    last_defense = None
     for run_config in all_run_configs:
         # To avoid reloading the model and dataset for every attack,
         # we only reload something if it's different from the last run
@@ -71,6 +82,23 @@ def run_attacks(all_run_configs: list[RunConfig], cfg: DictConfig, date_time_str
         if last_attack != run_config.attack:
             logging.info(f"Attack: {run_config.attack}\n{OmegaConf.to_yaml(run_config.attack_params, resolve=True)}")
             last_attack = run_config.attack
+        if last_defense != run_config.defense:
+            logging.info(f"Defense: {run_config.defense}")
+            last_defense = run_config.defense
+
+        if run_config.defense is not None and not Attack.supports_runtime_text_defense(run_config.attack):
+            raise ValueError(
+                f"Attack '{run_config.attack}' is incompatible with runtime black-box defenses. "
+                "Switch to an attack that supports runtime defenses (currently actor/crescendo/inpainting)."
+            )
+        if run_config.defense is not None:
+            required = Attack.required_defense_capabilities(run_config.attack)
+            provided = get_defense_capabilities(run_config.defense_params)
+            if not required.issubset(provided):
+                raise ValueError(
+                    f"Defense '{run_config.defense}' lacks required capabilities for attack '{run_config.attack}'. "
+                    f"required={sorted(required)} provided={sorted(provided)}"
+                )
 
         attack: Attack[AttackResult] = Attack.from_name(run_config.attack)(run_config.attack_params)
         results = attack.run(model, tokenizer, dataset)  # type: ignore
