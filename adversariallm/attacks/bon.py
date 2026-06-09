@@ -19,7 +19,7 @@ import transformers
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from ..defenses import Defense
+from ..defenses import TargetSystem
 from ..dataset import PromptDataset
 from ..lm_utils import prepare_conversation
 from ..types import Conversation
@@ -138,19 +138,15 @@ class BonAttack(Attack):
     @torch.no_grad
     def run(
         self,
-        model: transformers.AutoModelForCausalLM,
-        tokenizer: PreTrainedTokenizer,
+        target: TargetSystem,
         dataset: PromptDataset,
-        defense: Defense,
     ) -> AttackResult:
         """Run the Best-of-N attack on the given dataset.
 
         Parameters:
         ----------
-            model: The model to attack.
-            tokenizer: The tokenizer to use.
             dataset: The dataset to attack.
-            defense: Runtime interface for target-model generation and loss.
+            target: Runtime interface for target-system generation and loss.
 
         Returns:
         -------
@@ -187,7 +183,7 @@ class BonAttack(Attack):
                     {"role": "user", "content": augmented_user},
                     {"role": "assistant", "content": conversation[1]["content"]},
                 ]
-                token_tensors = prepare_conversation(tokenizer, loss_conv)
+                token_tensors = prepare_conversation(target.tokenizer, loss_conv)
                 flat_tokens = [t for turn_tokens in token_tensors for t in turn_tokens]
                 # Identify prompt tokens (everything before the target assistant turn)
                 prompt_token_tensors_list.append(torch.cat(flat_tokens[:-1]))
@@ -199,7 +195,7 @@ class BonAttack(Attack):
         B = len(original_conversations)
         t_start_loss = time.time()
         logging.info("Calculating losses...")
-        instance_losses = defense.loss(
+        instance_losses = target.loss(
             loss_full_token_tensors_list,
             prompt_token_tensors_list,
             initial_batch_size=max(B, 128),
@@ -210,7 +206,7 @@ class BonAttack(Attack):
         # --- 3. Generate Completions ---
         logging.info(f"Generating completions...")
         t_start_gen = time.time()
-        generation_result = defense.generate(
+        generation_result = target.generate(
             generation_conversations,
             max_new_tokens=self.config.generation_config.max_new_tokens,
             temperature=self.config.generation_config.temperature,

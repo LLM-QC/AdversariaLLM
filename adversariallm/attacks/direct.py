@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import torch
 import transformers
 
-from ..defenses import Defense
+from ..defenses import TargetSystem
 from ..lm_utils import prepare_conversation
 from .attack import (Attack, AttackResult, AttackStepResult,
                      GenerationConfig, SingleAttackRunResult)
@@ -33,19 +33,15 @@ class DirectAttack(Attack):
     @torch.no_grad
     def run(
         self,
-        model: transformers.AutoModelForCausalLM,
-        tokenizer: transformers.AutoTokenizer,
+        target: TargetSystem,
         dataset: torch.utils.data.Dataset,
-        defense: Defense,
     ) -> AttackResult:
         """Run the Direct attack on the given dataset.
 
         Parameters:
         ----------
-            model: The model to attack.
-            tokenizer: The tokenizer to use.
             dataset: The dataset to attack.
-            defense: Runtime interface for target-model generation and loss.
+            target: Runtime interface for target-system generation and loss.
 
         Returns:
         -------
@@ -66,11 +62,11 @@ class DirectAttack(Attack):
             conv_for_generation[-1]["content"] = ""
             generation_conversations.append(conv_for_generation)
 
-            token_tensors = prepare_conversation(tokenizer, conv_for_generation)
+            token_tensors = prepare_conversation(target.tokenizer, conv_for_generation)
             flat_prompt_tokens = [t for turn_tokens in token_tensors for t in turn_tokens]
             generation_prompt_token_tensors_list.append(torch.cat(flat_prompt_tokens, dim=0))
 
-            token_tensors = prepare_conversation(tokenizer, conversation)
+            token_tensors = prepare_conversation(target.tokenizer, conversation)
             flat_tokens = [t for turn_tokens in token_tensors for t in turn_tokens]
             # Concatenate all turns for the full input/target context.
             loss_full_token_tensors_list.append(torch.cat(flat_tokens, dim=0))
@@ -79,7 +75,7 @@ class DirectAttack(Attack):
         B = len(original_conversations)
         loss_time_total = 0.0
         t_start_loss = time.time()
-        instance_losses = defense.loss(
+        instance_losses = target.loss(
             loss_full_token_tensors_list,
             generation_prompt_token_tensors_list,
             initial_batch_size=B,
@@ -89,7 +85,7 @@ class DirectAttack(Attack):
 
         # --- 3. Generate Completions ---
         t_start_gen = time.time()
-        generation_result = defense.generate(
+        generation_result = target.generate(
             generation_conversations,
             max_new_tokens=self.config.generation_config.max_new_tokens,
             temperature=self.config.generation_config.temperature,

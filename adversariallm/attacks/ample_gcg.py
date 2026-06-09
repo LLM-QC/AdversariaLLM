@@ -19,7 +19,7 @@ import torch.nn as nn
 from tqdm import tqdm, trange
 from transformers import GenerationConfig as HuggingFaceGenerationConfig
 
-from ..defenses import Defense
+from ..defenses import TargetSystem
 from ..io_utils import free_vram, load_model_and_tokenizer
 from ..lm_utils import prepare_conversation
 
@@ -58,22 +58,22 @@ class AmpleGCGAttack(Attack):
         super().__init__(config)
 
     @torch.no_grad
-    def run(self, model: torch.nn.Module, tokenizer, dataset, defense: Defense) -> AttackResult:
+    def run(self, target: TargetSystem, dataset) -> AttackResult:
         runs = []
 
         for conversation in tqdm(dataset, file=sys.stdout):
             assert len(conversation) == 2, "Current AmpleGCG only supports single-turn conversations"
             msg = conversation[0]["content"]
-            target = conversation[1]["content"]
+            target_text = conversation[1]["content"]
             # Temporarily move target model to CPU while generating attack prompts.
-            device = model.device
-            model.cpu()
+            device = target.model.device
+            target.model.cpu()
             free_vram()
             t0 = time.time()
             batch_attacks = self.get_attack_prompts(f"### Query:{msg} ### Prompt:")
-            model.to(device)
+            target.model.to(device)
             attack_conversations = [
-                [{"role": "user", "content": f"{msg}{attack}"}, {"role": "assistant", "content": target}]
+                [{"role": "user", "content": f"{msg}{attack}"}, {"role": "assistant", "content": target_text}]
                 for attack in batch_attacks
             ]
             generation_conversations = copy.deepcopy(attack_conversations)
@@ -83,17 +83,17 @@ class AmpleGCGAttack(Attack):
             loss_full_token_tensors_list = []
             prompt_token_tensors_list = []
             for attack_conversation in attack_conversations:
-                token_tensors = prepare_conversation(tokenizer, attack_conversation)[0]
+                token_tensors = prepare_conversation(target.tokenizer, attack_conversation)[0]
                 prompt_token_tensors_list.append(torch.cat(token_tensors[:-1], dim=0))
                 loss_full_token_tensors_list.append(torch.cat(token_tensors, dim=0))
-            batch_losses = defense.loss(
+            batch_losses = target.loss(
                 loss_full_token_tensors_list,
                 prompt_token_tensors_list,
                 initial_batch_size=len(attack_conversations),
             )
             logging.info("Calculated losses")
 
-            generation_result = defense.generate(
+            generation_result = target.generate(
                 generation_conversations,
                 max_new_tokens=self.config.generation_config.max_new_tokens,
                 temperature=self.config.generation_config.temperature,

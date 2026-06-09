@@ -94,10 +94,12 @@ def test_jailbreak_r1_run_smoke(monkeypatch):
     monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.prepare_conversation", _mock_prepare_conversation)
     monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.load_model_and_tokenizer", _mock_load_model_and_tokenizer)
     defense = _patch_runtime_generator(monkeypatch, ["completion-step-0", "completion-step-1"])
+    defense.model = target_model
+    defense.tokenizer = target_tokenizer
 
     cfg = JailbreakR1Config(num_steps=2, parse_retries=2)
     attack = JailbreakR1Attack(cfg)
-    result = attack.run(target_model, target_tokenizer, DummyDataset(), defense)
+    result = attack.run(defense, DummyDataset())
 
     assert len(result.runs) == 1
     assert len(result.runs[0].steps) == 2
@@ -159,10 +161,12 @@ def test_jailbreak_r1_allow_untagged_fallback(monkeypatch):
     monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.generate_ragged_batched", _mock_generate_ragged_batched)
     monkeypatch.setattr("adversariallm.attacks.jailbreak_r1.prepare_conversation", _mock_prepare_conversation)
     defense = _patch_runtime_generator(monkeypatch, ["target completion"])
+    defense.model = target_model
+    defense.tokenizer = target_tokenizer
 
     cfg = JailbreakR1Config(num_steps=1, parse_retries=1, allow_untagged_fallback=True)
     attack = JailbreakR1Attack(cfg)
-    result = attack.run(target_model, target_tokenizer, DummyDataset(), defense)
+    result = attack.run(defense, DummyDataset())
 
     assert result.runs[0].steps[0].model_input[0]["content"] == "untagged generated attack prompt"
     assert result.runs[0].steps[0].scores["jailbreak_r1"]["parse_success"] == [0.0]
@@ -238,7 +242,9 @@ def test_jailbreak_r1_reads_cache_and_skips_attacker_loading(monkeypatch, tmp_pa
         json.dump(cache_payload, f)
 
     attack = JailbreakR1Attack(cfg)
-    result = attack.run(DummyModel(), DummyTokenizer(), DummyDataset(), defense)
+    defense.model = DummyModel()
+    defense.tokenizer = DummyTokenizer()
+    result = attack.run(defense, DummyDataset())
 
     assert len(result.runs) == 1
     assert len(result.runs[0].steps) == 1
@@ -318,7 +324,9 @@ def test_jailbreak_r1_reads_subset_by_behavior_id(monkeypatch, tmp_path):
         json.dump(cache_payload, f)
 
     attack = JailbreakR1Attack(cfg)
-    result = attack.run(DummyModel(), DummyTokenizer(), DummyDataset(), defense)
+    defense.model = DummyModel()
+    defense.tokenizer = DummyTokenizer()
+    result = attack.run(defense, DummyDataset())
 
     assert len(result.runs) == 1
     assert result.runs[0].steps[0].model_input[0]["content"] == "cached-b"
@@ -375,6 +383,8 @@ def test_jailbreak_r1_frees_attacker_vram_when_models_differ(monkeypatch, tmp_pa
         lambda model, tokenizer, token_list, **kwargs: [["target completion"]],
     )
     defense = _patch_runtime_generator(monkeypatch, ["target completion"])
+    defense.model = target_model
+    defense.tokenizer = target_tokenizer
 
     cfg = JailbreakR1Config(
         num_steps=1,
@@ -382,6 +392,6 @@ def test_jailbreak_r1_frees_attacker_vram_when_models_differ(monkeypatch, tmp_pa
         prompt_cache_path=str(tmp_path / "cache.json"),
     )
     attack = JailbreakR1Attack(cfg)
-    _ = attack.run(target_model, target_tokenizer, DummyDataset(), defense)
+    _ = attack.run(defense, DummyDataset())
 
     assert free_calls["n"] == 1

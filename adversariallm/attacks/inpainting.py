@@ -19,7 +19,7 @@ import transformers
 from beartype.typing import Optional
 from huggingface_hub import hf_hub_download
 
-from ..defenses import Defense
+from ..defenses import TargetSystem
 from ..dataset import PromptDataset
 from ..lm_utils import prepare_conversation
 from ..types import Conversation
@@ -92,18 +92,14 @@ class InpaintingAttack(Attack):
     @torch.no_grad
     def run(
         self,
-        model: transformers.PreTrainedModel,
-        tokenizer: transformers.PreTrainedTokenizerBase,
+        target: TargetSystem,
         dataset: PromptDataset,
-        defense: Defense,
     ) -> AttackResult:
         """Run the Inpainting attack on the given dataset.
         Parameters:
         ----------
-            model: The model to attack.
-            tokenizer: The tokenizer to use.
             dataset: The dataset to attack.
-            defense: Runtime interface for target-model generation and loss.
+            target: Runtime interface for target-system generation and loss.
 
         Returns:
         -------
@@ -133,11 +129,11 @@ class InpaintingAttack(Attack):
                 conv_for_generation[-1]["content"] = ""
                 generation_conversations.append(conv_for_generation)
 
-                prompt_token_tensors = prepare_conversation(tokenizer, conv_for_generation)
+                prompt_token_tensors = prepare_conversation(target.tokenizer, conv_for_generation)
                 prompt_flat_tokens = [t for turn_tokens in prompt_token_tensors for t in turn_tokens]
                 generation_prompt_token_tensors_list.append(torch.cat(prompt_flat_tokens, dim=0))
 
-                token_tensors = prepare_conversation(tokenizer, conversation)
+                token_tensors = prepare_conversation(target.tokenizer, conversation)
                 flat_tokens = [t for turn_tokens in token_tensors for t in turn_tokens]
                 # Concatenate all turns for the full input/target context.
                 loss_full_token_tensors_list.append(torch.cat(flat_tokens, dim=0))
@@ -147,7 +143,7 @@ class InpaintingAttack(Attack):
         # --- 2. Calculate Losses ---
         loss_time_total = 0.0
         t_start_loss = time.time()
-        instance_losses = defense.loss(
+        instance_losses = target.loss(
             loss_full_token_tensors_list,
             generation_prompt_token_tensors_list,
             initial_batch_size=B,
@@ -158,7 +154,7 @@ class InpaintingAttack(Attack):
 
         # --- 3. Generate Completions ---
         t_start_gen = time.time()
-        generation_result = defense.generate(
+        generation_result = target.generate(
             generation_conversations,
             max_new_tokens=self.config.generation_config.max_new_tokens,
             temperature=self.config.generation_config.temperature,

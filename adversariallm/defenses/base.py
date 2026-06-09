@@ -18,8 +18,8 @@ class DefenseDecision:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-class Defense(ABC):
-    """Runtime interface attacks use for defended target-model interactions."""
+class TargetSystem(ABC):
+    """Runtime interface attacks use for target-system interactions."""
 
     def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase):
         self.model = model
@@ -78,7 +78,7 @@ class Defense(ABC):
         return instance_losses
 
 
-class NoDefense(Defense):
+class UndefendedTarget(TargetSystem):
     DEFENSE_TYPE = "none"
 
     @classmethod
@@ -89,7 +89,7 @@ class NoDefense(Defense):
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
         default_generate_kwargs: dict[str, Any] | None = None,
-    ) -> "NoDefense":
+    ) -> "UndefendedTarget":
         return cls(model, tokenizer, default_generate_kwargs=default_generate_kwargs)
 
     def __init__(

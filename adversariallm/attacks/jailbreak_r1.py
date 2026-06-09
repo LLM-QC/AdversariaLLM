@@ -29,7 +29,7 @@ import torch
 import transformers
 
 from .attack import Attack, AttackResult, AttackStepResult, GenerationConfig, SingleAttackRunResult
-from ..defenses import Defense
+from ..defenses import TargetSystem
 from ..io_utils import free_vram, load_model_and_tokenizer
 from ..lm_utils import generate_ragged_batched, prepare_conversation
 from ..types import Conversation
@@ -487,10 +487,8 @@ class JailbreakR1Attack(Attack):
     @torch.no_grad()
     def run(
         self,
-        model: transformers.AutoModelForCausalLM,
-        tokenizer: transformers.AutoTokenizer,
+        target: TargetSystem,
         dataset: torch.utils.data.Dataset,
-        defense: Defense,
     ) -> AttackResult:
         conversations = list(dataset)
         behavior_ids = self._extract_behavior_ids(dataset, len(conversations))
@@ -534,7 +532,7 @@ class JailbreakR1Attack(Attack):
         attack_model: Optional[transformers.AutoModelForCausalLM] = None
         attack_tokenizer: Optional[transformers.AutoTokenizer] = None
         if missing_indices:
-            attack_model, attack_tokenizer = self._get_attack_model(model, tokenizer)
+            attack_model, attack_tokenizer = self._get_attack_model(target.model, target.tokenizer)
             prompts_per_behavior = (
                 self.config.prompt_cache_num_steps
                 if self.config.prompt_cache_num_steps is not None
@@ -569,7 +567,7 @@ class JailbreakR1Attack(Attack):
                     prompts_per_behavior,
                     len(missing_indices),
                 )
-        if attack_model is not None and attack_model is not model:
+        if attack_model is not None and attack_model is not target.model:
             del attack_model
             del attack_tokenizer
             free_vram()
@@ -595,7 +593,7 @@ class JailbreakR1Attack(Attack):
             t_prepare = time.time() - t_prepare_start
 
             t_target_start = time.time()
-            generation_result = defense.generate(
+            generation_result = target.generate(
                 generation_conversations,
                 initial_batch_size=len(generation_conversations),
                 max_new_tokens=self.config.generation_config.max_new_tokens,

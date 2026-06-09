@@ -5,11 +5,11 @@ from typing import Any, Protocol
 from omegaconf import DictConfig, OmegaConf
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
-from .base import Defense, NoDefense
+from .base import TargetSystem, UndefendedTarget
 from .polyguard import PolyGuardDefense
 
 
-class DefenseFactory(Protocol):
+class TargetSystemFactory(Protocol):
     @classmethod
     def from_config(
         cls,
@@ -18,12 +18,12 @@ class DefenseFactory(Protocol):
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
         default_generate_kwargs: dict[str, Any] | None = None,
-    ) -> Defense:
+    ) -> TargetSystem:
         ...
 
 
-_DEFENSE_REGISTRY: dict[str, type[DefenseFactory]] = {
-    NoDefense.DEFENSE_TYPE: NoDefense,
+_DEFENSE_REGISTRY: dict[str, type[TargetSystemFactory]] = {
+    UndefendedTarget.DEFENSE_TYPE: UndefendedTarget,
     PolyGuardDefense.DEFENSE_TYPE: PolyGuardDefense,
 }
 
@@ -47,13 +47,13 @@ def _as_dict(cfg: DictConfig | dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
-def create_defense(
+def build_target_system(
     defense_cfg: DictConfig | dict[str, Any] | None,
     *,
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
     default_generate_kwargs: dict[str, Any] | None = None,
-) -> Defense:
+) -> TargetSystem:
     if defense_cfg is None:
         defense_cfg = {"type": "none"}
     cfg = _as_dict(defense_cfg)

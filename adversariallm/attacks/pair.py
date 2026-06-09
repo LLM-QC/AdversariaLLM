@@ -25,7 +25,7 @@ from tqdm import trange
 
 from .attack import (Attack, AttackResult, AttackStepResult, GenerationConfig,
                      SingleAttackRunResult)
-from ..defenses import Defense
+from ..defenses import TargetSystem
 from ..io_utils import load_model_and_tokenizer
 from ..lm_utils import generate_ragged_batched, get_flops, prepare_conversation
 from ..types import Conversation
@@ -87,35 +87,31 @@ class PAIRAttack(Attack):
 
     def run(
         self,
-        model: transformers.AutoModelForCausalLM,
-        tokenizer: transformers.AutoTokenizer,
+        target: TargetSystem,
         dataset: torch.utils.data.Dataset,
-        defense: Defense,
     ) -> AttackResult:
         runs = []
         for conversation in dataset:
-            run = self.attack_single_prompt(model, tokenizer, conversation, defense)
+            run = self.attack_single_prompt(conversation, target)
             runs.append(run)
         return AttackResult(runs=runs)
 
     def attack_single_prompt(
         self,
-        model,
-        tokenizer,
         conversation: Conversation,
-        defense: Defense,
+        target: TargetSystem,
     ) -> SingleAttackRunResult:
         # Initialize models
         # Can share underlying model and save VRAM if attack & target model are the same
-        if self.config.attack_model.id == model.name_or_path:
-            attack_model, attack_tokenizer = model, tokenizer
+        if self.config.attack_model.id == target.model.name_or_path:
+            attack_model, attack_tokenizer = target.model, target.tokenizer
         else:
             attack_model, attack_tokenizer = load_model_and_tokenizer(self.config.attack_model)
 
-        target_lm = TargetLM(model, tokenizer, self.config.target_model, defense=defense)
+        target_lm = TargetLM(target.model, target.tokenizer, self.config.target_model, target=target)
         attack_lm = AttackLM(attack_model, attack_tokenizer, self.config.attack_model)
         if self.config.judge_model.id is None:
-            judge_lm = JudgeLM(model, tokenizer, prompt=conversation[0]["content"])
+            judge_lm = JudgeLM(target.model, target.tokenizer, prompt=conversation[0]["content"])
         else:
             judge_model, judge_tokenizer = load_model_and_tokenizer(self.config.judge_model)
             judge_lm = JudgeLM(judge_model, judge_tokenizer, prompt=conversation[0]["content"])
@@ -185,7 +181,7 @@ class PAIRAttack(Attack):
                 for target_response, score in zip(target_response_list, judge_scores)
             ]
         if self.config.generation_config.num_return_sequences > 1:
-            additional_result = target_lm.defense.generate(
+            additional_result = target_lm.target_system.generate(
                 attacks,
                 max_new_tokens=self.config.generation_config.max_new_tokens,
                 temperature=self.config.generation_config.temperature,
@@ -403,17 +399,17 @@ class TargetLM:
         model: transformers.AutoModelForCausalLM,
         tokenizer: transformers.AutoTokenizer,
         cfg,
-        defense: Defense,
+        target: TargetSystem,
     ):
         self.model = model
         self.tokenizer = tokenizer
         self.temperature = cfg.temperature
         self.max_new_tokens = cfg.max_new_tokens
         self.top_p = cfg.top_p
-        self.defense: Defense = defense
+        self.target_system = target
 
     def get_response(self, conversations: list[Conversation]) -> tuple[list[str], list[torch.Tensor], int, list[str] | None, list[dict] | None]:
-        generation_result = self.defense.generate(
+        generation_result = self.target_system.generate(
             conversations,
             max_new_tokens=self.max_new_tokens,
             temperature=self.temperature,

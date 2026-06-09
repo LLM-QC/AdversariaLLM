@@ -70,10 +70,10 @@ def test_collect_configs_rejects_unsupported_attack_before_loading_dataset(monke
         run_attacks.collect_configs(cfg)
 
 
-def test_runner_creates_and_passes_defense(monkeypatch):
+def test_runner_builds_and_passes_target_system(monkeypatch):
     from adversariallm.io_utils.config import RunConfig
 
-    sentinel_defense = object()
+    sentinel_target = object()
     calls = {}
     events = []
 
@@ -82,17 +82,17 @@ def test_runner_creates_and_passes_defense(monkeypatch):
             events.append("attack")
             calls["attack_params"] = attack_params
 
-        def run(self, model, tokenizer, dataset, defense):
-            calls["run_args"] = (model, tokenizer, dataset, defense)
+        def run(self, target, dataset):
+            calls["run_args"] = (target, dataset)
             return "results"
 
     monkeypatch.setattr(run_attacks, "load_model_and_tokenizer", lambda _params: ("model", "tokenizer"))
     monkeypatch.setattr(run_attacks, "PromptDataset", type("PD", (), {"from_name": staticmethod(lambda _n: (lambda _p: []))}))
-    def _create_defense(cfg, *, model, tokenizer):
-        events.append("defense")
-        return sentinel_defense
+    def _build_target_system(cfg, *, model, tokenizer):
+        events.append("target")
+        return sentinel_target
 
-    monkeypatch.setattr(run_attacks, "create_defense", _create_defense)
+    monkeypatch.setattr(run_attacks, "build_target_system", _build_target_system)
     monkeypatch.setattr(run_attacks.Attack, "from_name", classmethod(lambda _cls, _name: _DummyAttack))
     monkeypatch.setattr(run_attacks, "log_attack", lambda *_args, **_kwargs: None)
 
@@ -110,8 +110,8 @@ def test_runner_creates_and_passes_defense(monkeypatch):
 
     run_attacks.run_attacks([rc], cfg, "2026-04-06/00-00-00")
 
-    assert events == ["attack", "defense"]
-    assert calls["run_args"] == ("model", "tokenizer", [], sentinel_defense)
+    assert events == ["attack", "target"]
+    assert calls["run_args"] == (sentinel_target, [])
 
 
 def test_collect_configs_resolves_interpolations_with_defense(monkeypatch):

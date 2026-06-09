@@ -1,6 +1,7 @@
 from omegaconf import OmegaConf
 
 from adversariallm.attacks.gcg_reinforce import GCGReinforceAttack
+from adversariallm.defenses import build_target_system
 from adversariallm.io_utils import load_model_and_tokenizer
 
 
@@ -58,7 +59,7 @@ def test_gcg_reinforce_attack():
             "trust_remote_code": True
         })
         model, tokenizer = load_model_and_tokenizer(model_config)
-        attack.run(model, tokenizer, dataset, None)
+        attack.run(build_target_system(None, model=model, tokenizer=tokenizer), dataset)
     except Exception as e:
         print(f"Error occurred: {e}")
         import traceback

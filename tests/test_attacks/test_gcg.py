@@ -1,6 +1,7 @@
 from omegaconf import OmegaConf
 
 from adversariallm.attacks.gcg import GCGAttack
+from adversariallm.defenses import build_target_system
 from adversariallm.io_utils import load_model_and_tokenizer
 
 
@@ -56,7 +57,7 @@ def test_gcg_attack():
             "trust_remote_code": True
         })
         model, tokenizer = load_model_and_tokenizer(model_config)
-        result = attack.run(model, tokenizer, dataset, None)
+        result = attack.run(build_target_system(None, model=model, tokenizer=tokenizer), dataset)
 
         # Check that result has expected structure
         assert hasattr(result, 'runs'), "Result should have 'runs' attribute"

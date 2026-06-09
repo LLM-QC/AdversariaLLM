@@ -1,15 +1,15 @@
-from .base import Defense, DefenseDecision, NoDefense
+from .base import DefenseDecision, TargetSystem, UndefendedTarget
 from .polyguard import PolyGuardConfig, PolyGuardDefense, parse_polyguard_output
-from .registry import DEFENSE_COMPATIBLE_ATTACKS, create_defense, validate_defense_compatibility
+from .registry import DEFENSE_COMPATIBLE_ATTACKS, build_target_system, validate_defense_compatibility
 
 __all__ = [
-    "Defense",
     "DefenseDecision",
-    "NoDefense",
     "PolyGuardConfig",
     "PolyGuardDefense",
+    "TargetSystem",
+    "UndefendedTarget",
     "DEFENSE_COMPATIBLE_ATTACKS",
-    "create_defense",
+    "build_target_system",
     "parse_polyguard_output",
     "validate_defense_compatibility",
 ]

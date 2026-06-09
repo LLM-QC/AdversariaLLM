@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
 from adversariallm.attacks.direct import DirectAttack
-from adversariallm.defenses import create_defense
+from adversariallm.defenses import build_target_system
 from adversariallm.io_utils import load_model_and_tokenizer
 
 
@@ -55,7 +55,10 @@ def test_direct_attack():
             "trust_remote_code": True
         })
         model, tokenizer = load_model_and_tokenizer(model_config)
-        result = attack.run(model, tokenizer, dataset, create_defense(None, model=model, tokenizer=tokenizer))
+        result = attack.run(
+            build_target_system(None, model=model, tokenizer=tokenizer),
+            dataset,
+        )
 
         # Check that result has expected structure
         assert result is not None

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from adversariallm.defenses import Defense, NoDefense, create_defense, parse_polyguard_output
+from adversariallm.defenses import TargetSystem, UndefendedTarget, build_target_system, parse_polyguard_output
 from adversariallm.lm_utils.text_generation import GenerationResult, TextGenerator
 
 
@@ -30,20 +30,23 @@ def test_parse_polyguard_output_expected_fields():
     }
 
 
-def test_create_defense_none_returns_no_defense():
-    assert isinstance(create_defense(None, model=object(), tokenizer=object()), NoDefense)
-    assert isinstance(create_defense({"type": "none"}, model=object(), tokenizer=object()), NoDefense)
+def test_build_target_system_none_returns_undefended_target():
+    assert isinstance(build_target_system(None, model=object(), tokenizer=object()), UndefendedTarget)
+    assert isinstance(
+        build_target_system({"type": "none"}, model=object(), tokenizer=object()),
+        UndefendedTarget,
+    )
 
 
-def test_create_defense_unknown_type():
+def test_build_target_system_unknown_defense_type():
     with pytest.raises(ValueError, match="Unknown defense type"):
-        create_defense({"type": "not_a_real_defense"}, model=object(), tokenizer=object())
+        build_target_system({"type": "not_a_real_defense"}, model=object(), tokenizer=object())
 
 
 def test_defense_loss_matches_previous_target_token_slicing(monkeypatch):
     from adversariallm.defenses import base as base_mod
 
-    class _LossOnlyDefense(Defense):
+    class _LossOnlyTarget(TargetSystem):
         def generate(self, convs, **kwargs):
             raise NotImplementedError
 
@@ -58,7 +61,7 @@ def test_defense_loss_matches_previous_target_token_slicing(monkeypatch):
 
     full_tokens = [torch.arange(6), torch.arange(8), torch.arange(4)]
     prompt_tokens = [full_tokens[0][:3], full_tokens[1][:2], full_tokens[2]]
-    losses = _LossOnlyDefense(object(), object()).loss(
+    losses = _LossOnlyTarget(object(), object()).loss(
         full_tokens,
         prompt_tokens,
         initial_batch_size=1,
@@ -133,7 +136,7 @@ def test_polyguard_uses_repo_model_loader_and_adaptive_batching(monkeypatch):
     monkeypatch.setattr(polyguard_mod, "with_max_batchsize", _fake_with_max_batchsize)
     monkeypatch.setattr(polyguard_mod, "LocalTextGenerator", lambda _model, _tokenizer, default_generate_kwargs=None: _EchoGenerator())
 
-    defended = create_defense(
+    defended = build_target_system(
         {
             "type": "polyguard",
             "batch_size": 4,

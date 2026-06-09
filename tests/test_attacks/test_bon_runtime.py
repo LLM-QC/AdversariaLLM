@@ -26,6 +26,9 @@ def test_bon_uses_runtime_generator_without_defense(monkeypatch):
     gen_calls = {"count": 0}
 
     class FakeDefense:
+        model = object()
+        tokenizer = object()
+
         def loss(self, full_token_tensors, prompt_token_tensors, *, initial_batch_size, verbose=False):
             loss_calls["count"] += 1
             assert len(full_token_tensors) == 2
@@ -47,7 +50,7 @@ def test_bon_uses_runtime_generator_without_defense(monkeypatch):
 
     cfg = BonConfig(num_steps=2)
     attack = BonAttack(cfg)
-    res = attack.run(model=object(), tokenizer=object(), dataset=_dataset(), defense=FakeDefense())
+    res = attack.run(FakeDefense(), _dataset())
 
     assert loss_calls["count"] == 1
     assert gen_calls["count"] == 1
@@ -61,6 +64,9 @@ def test_bon_uses_runtime_generator_with_defense_and_computes_loss(monkeypatch):
     monkeypatch.setattr("adversariallm.attacks.bon.prepare_conversation", _fake_prepare_conversation)
 
     class FakeDefense:
+        model = object()
+        tokenizer = object()
+
         def loss(self, full_token_tensors, prompt_token_tensors, *, initial_batch_size, verbose=False):
             assert len(full_token_tensors) == 2
             assert len(prompt_token_tensors) == 2
@@ -81,7 +87,7 @@ def test_bon_uses_runtime_generator_with_defense_and_computes_loss(monkeypatch):
 
     cfg = BonConfig(num_steps=2)
     attack = BonAttack(cfg)
-    res = attack.run(model=object(), tokenizer=object(), dataset=_dataset(), defense=FakeDefense())
+    res = attack.run(FakeDefense(), _dataset())
 
     s0, s1 = res.runs[0].steps
     assert s0.loss == 3.5 and s1.loss == 4.5
@@ -94,6 +100,9 @@ def test_bon_requires_input_ids(monkeypatch):
     monkeypatch.setattr("adversariallm.attacks.bon.prepare_conversation", _fake_prepare_conversation)
 
     class FakeDefense:
+        model = object()
+        tokenizer = object()
+
         def loss(self, full_token_tensors, prompt_token_tensors, *, initial_batch_size, verbose=False):
             return [1.5, 2.5]
 
@@ -106,4 +115,4 @@ def test_bon_requires_input_ids(monkeypatch):
     import pytest
 
     with pytest.raises(ValueError, match="BON requires `generation_result.input_ids`"):
-        attack.run(model=object(), tokenizer=object(), dataset=_dataset(), defense=FakeDefense())
+        attack.run(FakeDefense(), _dataset())

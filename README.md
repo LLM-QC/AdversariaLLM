@@ -113,8 +113,9 @@ The framework supports various adversarial attack algorithms:
 ## Defenses
 
 The framework supports optional runtime defenses configured via `conf/defenses/defenses.yaml`.
-At runtime, attacks interact with a `Defense` object rather than the model directly.
-A Defense could be a model combined with a linear probe filtering for harmful content.
+At runtime, attacks interact with a `TargetSystem` object that represents the complete system
+being attacked. An `UndefendedTarget` implementation provides normal model generation, while a defense can wrap
+the model with additional behavior such as a linear probe filtering harmful content.
 
 Runtime defenses are currently supported by `actor`, `ample_gcg`, `bon`, `crescendo`, `direct`,
 `inpainting`, `jailbreak_r1`, and `pair`.
@@ -128,8 +129,8 @@ python run_attacks.py \
   defense=polyguard
 ```
 
-### It's easy to add the custom defense you want ot benchmark!
-To add a custom defense, subclass `Defense`, implement `generate(...)`, add a `from_config(...)`
+### It's easy to add the custom defense you want to benchmark!
+To add a custom defense, subclass `TargetSystem`, implement `generate(...)`, add a `from_config(...)`
 constructor, and register the class in `adversariallm/defenses/registry.py`. Defenses can use
 `LocalTextGenerator` internally, but may also interact with the model directly, for example to
 inspect activations or alter decoding. You may use `PolyGuard` as a reference implementation.

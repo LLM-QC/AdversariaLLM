@@ -66,9 +66,10 @@ class AutoDANAttack(Attack):
         super().__init__(config)
 
     @torch.no_grad
-    def run(self, model, tokenizer, dataset, _defense) -> AttackResult:
+    def run(self, target, dataset) -> AttackResult:
         """Run the AutoDAN attack against a given model and dataset."""
-        # Runtime defenses are not supported by AutoDAN yet.
+        model = target.model
+        tokenizer = target.tokenizer
         if self.config.mutate_model.id is not None:
             mutate_model = HuggingFace(
                 self.config.mutate_model.id,

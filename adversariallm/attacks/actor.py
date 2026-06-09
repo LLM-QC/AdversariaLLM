@@ -24,7 +24,7 @@ from beartype.typing import Optional
 from dotenv import load_dotenv
 
 from ..io_utils import load_model_and_tokenizer
-from ..defenses import Defense
+from ..defenses import TargetSystem
 from ..lm_utils import (
     APIRetryOverrides,
     APITextGenerator,
@@ -130,16 +130,14 @@ class ActorAttack(Attack[ActorAttackResult]):
 
     def run(
         self,
-        model: transformers.AutoModelForCausalLM,
-        tokenizer: transformers.AutoTokenizer,
+        target: TargetSystem,
         dataset: torch.utils.data.Dataset,
-        defense: Defense,
     ) -> ActorAttackResult:
         load_dotenv(override=True)
         base_url = os.getenv("BASE_URL_GPT")
         logging.info(f"BASE_URL_GPT: {repr(base_url)}")
 
-        target_model, attack_model, judge = self.setup_models(model, tokenizer, defense)
+        target_model, attack_model, judge = self.setup_models(target)
 
         data = list(dataset)
         org_queries = [msg["content"] for msg, _ in data]
@@ -169,10 +167,8 @@ class ActorAttack(Attack[ActorAttackResult]):
 
     def setup_models(
         self,
-        model,
-        tokenizer,
-        defense: Defense,
-    ) -> tuple[Defense, TextGenerator, "Judge"]:
+        target: TargetSystem,
+    ) -> tuple[TargetSystem, TextGenerator, "Judge"]:
         # attacker
         if self.attack_model_config.use_api:
             attack_generate_kwargs = {**self.attack_generation_config}
@@ -182,9 +178,9 @@ class ActorAttack(Attack[ActorAttackResult]):
                 default_generate_kwargs=attack_generate_kwargs,
             )
         else:
-            if self.attack_model_config.id == model.model.name_or_path:
+            if self.attack_model_config.id == target.model.model.name_or_path:
                 # target and attack models are equal, so reuse
-                attack_model, attack_tokenizer = model, tokenizer
+                attack_model, attack_tokenizer = target.model, target.tokenizer
             else:
                 attack_model, attack_tokenizer = load_model_and_tokenizer(self.attack_model_config)
 
@@ -193,7 +189,7 @@ class ActorAttack(Attack[ActorAttackResult]):
             )
 
         # judge
-        developer_name = model.config.developer_name
+        developer_name = target.model.config.developer_name
         if self.judge_model_config.use_api:
             judge = APIJudge(
                 self.judge_model_config.api_model_name,
@@ -203,9 +199,9 @@ class ActorAttack(Attack[ActorAttackResult]):
             if self.judge_model_config.id == self.config.attack_model.id:
                 # attack and judge models are equal, so reuse
                 judge_model, judge_tokenizer = attacker.model, attacker.tokenizer
-            elif self.judge_model_config.id == model.model.name_or_path:
+            elif self.judge_model_config.id == target.model.model.name_or_path:
                 # target and judge models are equal, so reuse
-                judge_model, judge_tokenizer = model, tokenizer
+                judge_model, judge_tokenizer = target.model, target.tokenizer
             else:
                 judge_model, judge_tokenizer = load_model_and_tokenizer(self.config.judge_model)
 
@@ -216,7 +212,7 @@ class ActorAttack(Attack[ActorAttackResult]):
                 developer_name=developer_name,
             )
 
-        return defense, attacker, judge
+        return target, attacker, judge
 
     def generate_attack_strats(self, attack_model: TextGenerator, org_queries: list[str]) -> dict:
         # break down the harmful instruction into central harm, how to deliver the harm and further details
@@ -456,7 +452,7 @@ class ActorAttack(Attack[ActorAttackResult]):
 
     def unroll_multi_turn(
         self,
-        target_model: Defense,
+        target_model: TargetSystem,
         attack_model: TextGenerator,
         judge: "Judge",
         instructions: list[str],
@@ -578,7 +574,7 @@ class ActorAttack(Attack[ActorAttackResult]):
 
     def summary(
         self,
-        target_model: Defense,
+        target_model: TargetSystem,
         judge: "Judge",
         instructions: list[str],
         query_details_list: list[dict[str, str]],
@@ -693,7 +689,7 @@ class ActorAttack(Attack[ActorAttackResult]):
 
     def attack_multi_turn(
         self,
-        target_model: Defense,
+        target_model: TargetSystem,
         attack_model: TextGenerator,
         attack_strat: dict,
         judge: "Judge",

@@ -77,8 +77,9 @@ class RandomSearchAttack(Attack):
         return allowed_idx[torch.multinomial(probs, k, replacement=True)]
 
     @torch.no_grad()
-    def run(self, model: torch.nn.Module, tokenizer, dataset, _defense) -> AttackResult:
-        # Runtime defenses are not supported by Random Search yet.
+    def run(self, target, dataset) -> AttackResult:
+        model = target.model
+        tokenizer = target.tokenizer
         self.disallowed_ids = get_disallowed_ids(tokenizer, allow_non_ascii=False, allow_special=False)
 
         # ---- Tokenise dataset & build masks --------------------------------

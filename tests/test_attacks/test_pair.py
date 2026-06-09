@@ -4,7 +4,7 @@ import torch
 from omegaconf import OmegaConf
 
 from adversariallm.attacks.pair import PAIRAttack
-from adversariallm.defenses import create_defense
+from adversariallm.defenses import build_target_system
 from adversariallm.io_utils import load_model_and_tokenizer
 from adversariallm.lm_utils.text_generation import GenerationResult
 
@@ -62,7 +62,10 @@ def test_pair_attack():
             "trust_remote_code": True
         })
         model, tokenizer = load_model_and_tokenizer(model_config)
-        result = attack.run(model, tokenizer, dataset, create_defense(None, model=model, tokenizer=tokenizer))
+        result = attack.run(
+            build_target_system(None, model=model, tokenizer=tokenizer),
+            dataset,
+        )
 
         # Check that the result has expected structure
         assert result is not None
@@ -134,6 +137,9 @@ def test_pair_num_return_sequences_with_many_streams(monkeypatch):
         return [1 for _ in prompt_list], 0
 
     class FakeDefense:
+        model = DummyModel()
+        tokenizer = DummyTokenizer()
+
         def generate(self, conversations, **kwargs):
             extras_per_prompt = kwargs["num_return_sequences"]
             return GenerationResult(
@@ -148,7 +154,7 @@ def test_pair_num_return_sequences_with_many_streams(monkeypatch):
     monkeypatch.setattr("adversariallm.attacks.pair.JudgeLM.score", _mock_score)
 
     attack = PAIRAttack(cfg)
-    result = attack.run(DummyModel(), DummyTokenizer(), DummyDataset(), FakeDefense())
+    result = attack.run(FakeDefense(), DummyDataset())
 
     assert len(result.runs) == 1
     assert len(result.runs[0].steps) == 1

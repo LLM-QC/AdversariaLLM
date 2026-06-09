@@ -11,7 +11,7 @@ from ..io_utils import load_model_and_tokenizer
 from ..lm_utils import LocalTextGenerator, with_max_batchsize
 from ..lm_utils.text_generation import GenerationResult, RetryOverrides
 from ..types import Conversation
-from .base import Defense, DefenseDecision
+from .base import DefenseDecision, TargetSystem
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ def _last_user_content(conv: Conversation) -> str:
     return ""
 
 
-class PolyGuardDefense(Defense):
+class PolyGuardDefense(TargetSystem):
     DEFENSE_TYPE = "polyguard"
 
     def __init__(self, model, tokenizer, config: PolyGuardConfig, default_generate_kwargs: dict[str, Any] | None = None):

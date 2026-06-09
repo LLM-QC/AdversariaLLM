@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from abc import abstractmethod
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
 
 from torch import Tensor
 import transformers
@@ -9,6 +9,9 @@ from beartype.typing import Literal, Optional, Generic, TypeVar
 
 from ..dataset import PromptDataset
 from ..types import Conversation
+
+if TYPE_CHECKING:
+    from ..defenses import TargetSystem
 
 
 @dataclass
@@ -182,14 +185,12 @@ class Attack(Generic[AttRes]):
     @abstractmethod
     def run(
         self,
-        model: transformers.PreTrainedModel,
-        tokenizer: transformers.PreTrainedTokenizerBase,
+        target: "TargetSystem",
         dataset: PromptDataset,
-        defense: Any,
     ) -> AttRes:
-        """Run the attack against the target model through the supplied defense.
+        """Run the attack against the supplied target system.
 
         Registry validation ensures attacks without runtime-defense support only
-        receive the no-defense implementation.
+        receive the undefended implementation.
         """
         raise NotImplementedError

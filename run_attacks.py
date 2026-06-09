@@ -10,7 +10,7 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from adversariallm.attacks import Attack, AttackResult
 from adversariallm.dataset import PromptDataset
-from adversariallm.defenses import create_defense, validate_defense_compatibility
+from adversariallm.defenses import build_target_system, validate_defense_compatibility
 from adversariallm.errors import print_exceptions
 from adversariallm.io_utils import RunConfig, filter_config, free_vram, load_model_and_tokenizer, log_attack
 from run_judges import run_judges
@@ -86,12 +86,12 @@ def run_attacks(all_run_configs: list[RunConfig], cfg: DictConfig, date_time_str
             last_defense = run_config.defense
 
         attack: Attack[AttackResult] = Attack.from_name(run_config.attack)(run_config.attack_params)
-        defense = create_defense(
+        target = build_target_system(
             run_config.defense_params,
             model=model,
             tokenizer=tokenizer,
         )
-        results = attack.run(model, tokenizer, dataset, defense)  # type: ignore
+        results = attack.run(target, dataset)  # type: ignore
 
         log_attack(run_config, results, cfg, date_time_string)
 

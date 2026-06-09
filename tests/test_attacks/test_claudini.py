@@ -98,7 +98,7 @@ def test_claudini_v63_run_smoke(monkeypatch):
     tokenizer = DummyTokenizer()
     dataset = DummyDataset()
 
-    result = attack.run(model, tokenizer, dataset, None)
+    result = attack.run(SimpleNamespace(model=model, tokenizer=tokenizer), dataset)
     assert len(result.runs) == 1
     run = result.runs[0]
     assert len(run.steps) == 2
@@ -119,7 +119,7 @@ def test_claudini_other_versions_smoke(monkeypatch, variant):
     tokenizer = DummyTokenizer()
     dataset = DummyDataset()
 
-    result = attack.run(model, tokenizer, dataset, None)
+    result = attack.run(SimpleNamespace(model=model, tokenizer=tokenizer), dataset)
     assert len(result.runs) == 1
     run = result.runs[0]
     assert len(run.steps) == 1
@@ -144,7 +144,7 @@ def test_claudini_last_step_sampling_override(monkeypatch):
     model = DummyModel()
     tokenizer = DummyTokenizer()
     dataset = DummyDataset()
-    result = attack.run(model, tokenizer, dataset, None)
+    result = attack.run(SimpleNamespace(model=model, tokenizer=tokenizer), dataset)
     run = result.runs[0]
     assert len(run.steps) == 2
     assert len(run.steps[0].model_completions) == 1

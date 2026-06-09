@@ -33,6 +33,9 @@ def test_inpainting_uses_runtime_generator_without_defense(monkeypatch, tmp_path
     calls = {"generator_called": 0}
 
     class FakeDefense:
+        model = object()
+        tokenizer = object()
+
         def loss(self, full_token_tensors, prompt_token_tensors, *, initial_batch_size, verbose=False):
             assert len(full_token_tensors) == 1
             assert len(prompt_token_tensors) == 1
@@ -52,7 +55,7 @@ def test_inpainting_uses_runtime_generator_without_defense(monkeypatch, tmp_path
     attack = InpaintingAttack(cfg)
 
     dataset = [[{"role": "user", "content": "orig prompt"}, {"role": "assistant", "content": "target answer"}]]
-    res = attack.run(model=object(), tokenizer=object(), dataset=dataset, defense=FakeDefense())
+    res = attack.run(FakeDefense(), dataset)
 
     assert calls["generator_called"] == 1
     assert len(res.runs) == 1
@@ -72,6 +75,9 @@ def test_inpainting_uses_runtime_generator_with_defense_and_computes_loss(monkey
     monkeypatch.setattr("adversariallm.attacks.inpainting.prepare_conversation", _fake_prepare_conversation)
 
     class FakeDefense:
+        model = object()
+        tokenizer = object()
+
         def loss(self, full_token_tensors, prompt_token_tensors, *, initial_batch_size, verbose=False):
             assert len(full_token_tensors) == 1
             assert len(prompt_token_tensors) == 1
@@ -94,7 +100,7 @@ def test_inpainting_uses_runtime_generator_with_defense_and_computes_loss(monkey
     attack = InpaintingAttack(cfg)
 
     dataset = [[{"role": "user", "content": "orig prompt"}, {"role": "assistant", "content": "target answer"}]]
-    res = attack.run(model=object(), tokenizer=object(), dataset=dataset, defense=FakeDefense())
+    res = attack.run(FakeDefense(), dataset)
 
     step = res.runs[0].steps[0]
     assert step.model_completions == ["defended completion"]
@@ -111,6 +117,9 @@ def test_inpainting_requires_input_ids_from_runtime_generator(monkeypatch, tmp_p
     monkeypatch.setattr("adversariallm.attacks.inpainting.prepare_conversation", _fake_prepare_conversation)
 
     class FakeDefense:
+        model = object()
+        tokenizer = object()
+
         def loss(self, full_token_tensors, prompt_token_tensors, *, initial_batch_size, verbose=False):
             assert len(full_token_tensors) == 1
             assert len(prompt_token_tensors) == 1
@@ -126,4 +135,4 @@ def test_inpainting_requires_input_ids_from_runtime_generator(monkeypatch, tmp_p
     import pytest
 
     with pytest.raises(ValueError, match="requires `generation_result.input_ids`"):
-        attack.run(model=object(), tokenizer=object(), dataset=dataset, defense=FakeDefense())
+        attack.run(FakeDefense(), dataset)

@@ -89,8 +89,9 @@ class GCGRefusalAttack(Attack):
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
 
-    def run(self, model, tokenizer, dataset, _defense) -> AttackResult:
-        # Runtime defenses are not supported by GCG-Refusal yet.
+    def run(self, target, dataset) -> AttackResult:
+        model = target.model
+        tokenizer = target.tokenizer
         not_allowed_ids = get_disallowed_ids(tokenizer, self.config.allow_non_ascii, self.config.allow_special).to(model.device)
         runs = []
 
