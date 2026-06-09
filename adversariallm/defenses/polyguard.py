@@ -68,7 +68,6 @@ class PolyGuardConfig:
     chat_template: str | None = None
     dtype: str = "bfloat16"
     device: str = "cuda"
-    cache_dir: str | None = None
     max_new_tokens: int = 64
     batch_size: int | None = None
     overwrite_mode: Literal["harmful_content", "harmful_response_only"] = "harmful_content"
@@ -123,13 +122,10 @@ class PolyGuardDefense(Defense):
         *,
         model,
         tokenizer,
-        default_cache_dir: str | None = None,
         default_generate_kwargs: dict[str, Any] | None = None,
     ) -> "PolyGuardDefense":
         model_cfg = dict(cfg["model"])
         model_cfg["model_id"] = model_cfg.pop("id")
-        if model_cfg["cache_dir"] is None:
-            model_cfg["cache_dir"] = default_cache_dir
 
         runtime_fields = {
             "max_new_tokens": cfg["max_new_tokens"],

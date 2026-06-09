@@ -15,7 +15,6 @@ polyguard:
     chat_template: null
     dtype: bfloat16
     device: cuda
-    cache_dir: null
   max_new_tokens: 64
   batch_size: null
   overwrite_mode: harmful_content

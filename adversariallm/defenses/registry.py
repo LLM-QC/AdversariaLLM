@@ -8,6 +8,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from .base import Defense, NoDefense
 from .polyguard import PolyGuardDefense
 
+
 class DefenseFactory(Protocol):
     @classmethod
     def from_config(
@@ -16,7 +17,6 @@ class DefenseFactory(Protocol):
         *,
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
-        default_cache_dir: str | None = None,
         default_generate_kwargs: dict[str, Any] | None = None,
     ) -> Defense:
         ...
@@ -52,7 +52,6 @@ def create_defense(
     *,
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
-    default_cache_dir: str | None = None,
     default_generate_kwargs: dict[str, Any] | None = None,
 ) -> Defense:
     if defense_cfg is None:
@@ -70,7 +69,6 @@ def create_defense(
         cfg,
         model=model,
         tokenizer=tokenizer,
-        default_cache_dir=default_cache_dir,
         default_generate_kwargs=default_generate_kwargs,
     )
 

@@ -88,10 +88,8 @@ class NoDefense(Defense):
         *,
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
-        default_cache_dir: str | None = None,
         default_generate_kwargs: dict[str, Any] | None = None,
     ) -> "NoDefense":
-        del default_cache_dir
         return cls(model, tokenizer, default_generate_kwargs=default_generate_kwargs)
 
     def __init__(

@@ -150,7 +150,6 @@ def test_polyguard_uses_repo_model_loader_and_adaptive_batching(monkeypatch):
                 "chat_template": None,
                 "dtype": "bfloat16",
                 "device": "cpu",
-                "cache_dir": None,
             },
         },
         model=object(),
