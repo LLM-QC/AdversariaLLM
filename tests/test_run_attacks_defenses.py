@@ -27,8 +27,8 @@ def test_collect_configs_includes_defense(monkeypatch):
             "datasets": {"d": {"idx": [0]}},
             "attacks": {"actor": {"name": "actor"}},
             "defenses": {
-                "none": {"type": "none"},
-                "polyguard": {"type": "polyguard"},
+                "none": {"name": "none"},
+                "polyguard": {"name": "polyguard"},
             },
             "model": "m",
             "dataset": "d",
@@ -44,7 +44,7 @@ def test_collect_configs_includes_defense(monkeypatch):
     assert isinstance(run_configs[0].attack_params, DictConfig)
     assert isinstance(run_configs[0].defense_params, DictConfig)
     assert "defense" not in run_configs[0].attack_params
-    assert run_configs[0].defense_params["type"] == "polyguard"
+    assert run_configs[0].defense_params["name"] == "polyguard"
 
 
 def test_collect_configs_rejects_unsupported_attack_before_loading_dataset(monkeypatch):
@@ -57,7 +57,7 @@ def test_collect_configs_rejects_unsupported_attack_before_loading_dataset(monke
             "models": {"m": {"id": "m"}},
             "datasets": {"d": {"idx": [0]}},
             "attacks": {"gcg": {"name": "gcg"}},
-            "defenses": {"polyguard": {"type": "polyguard"}},
+            "defenses": {"polyguard": {"name": "polyguard"}},
             "model": "m",
             "dataset": "d",
             "attack": "gcg",
@@ -142,7 +142,7 @@ def test_collect_configs_resolves_interpolations_with_defense(monkeypatch):
                 "_default": {"generation_config": {"max_new_tokens": 42}},
                 "inpainting": {"generation_config": "${attacks._default.generation_config}"},
             },
-            "defenses": {"polyguard": {"type": "polyguard"}, "none": {"type": "none"}},
+            "defenses": {"polyguard": {"name": "polyguard"}, "none": {"name": "none"}},
             "model": "m",
             "dataset": "d",
             "attack": "inpainting",

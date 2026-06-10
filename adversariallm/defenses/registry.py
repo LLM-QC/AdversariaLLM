@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
@@ -9,22 +9,9 @@ from .base import TargetSystem, UndefendedTarget
 from .polyguard import PolyGuardDefense
 
 
-class TargetSystemFactory(Protocol):
-    @classmethod
-    def from_config(
-        cls,
-        cfg: dict[str, Any],
-        *,
-        model: PreTrainedModel,
-        tokenizer: PreTrainedTokenizerBase,
-        default_generate_kwargs: dict[str, Any] | None = None,
-    ) -> TargetSystem:
-        ...
-
-
-_DEFENSE_REGISTRY: dict[str, type[TargetSystemFactory]] = {
-    UndefendedTarget.DEFENSE_TYPE: UndefendedTarget,
-    PolyGuardDefense.DEFENSE_TYPE: PolyGuardDefense,
+_DEFENSE_REGISTRY: dict[str, type[TargetSystem]] = {
+    UndefendedTarget.NAME: UndefendedTarget,
+    PolyGuardDefense.NAME: PolyGuardDefense,
 }
 
 DEFENSE_COMPATIBLE_ATTACKS = frozenset(
@@ -55,16 +42,16 @@ def build_target_system(
     default_generate_kwargs: dict[str, Any] | None = None,
 ) -> TargetSystem:
     if defense_cfg is None:
-        defense_cfg = {"type": "none"}
+        defense_cfg = {"name": "none"}
     cfg = _as_dict(defense_cfg)
-    defense_type = cfg.get("type", "none")
-    if defense_type is None:
-        defense_type = "none"
-    cfg = {**cfg, "type": defense_type}
+    defense_name = cfg.get("name", "none")
+    if defense_name is None:
+        defense_name = "none"
+    cfg = {**cfg, "name": defense_name}
 
-    defense_cls = _DEFENSE_REGISTRY.get(defense_type)
+    defense_cls = _DEFENSE_REGISTRY.get(defense_name)
     if defense_cls is None:
-        raise ValueError(f"Unknown defense type: {defense_type}")
+        raise ValueError(f"Unknown defense: {defense_name}")
     return defense_cls.from_config(
         cfg,
         model=model,
@@ -80,8 +67,8 @@ def validate_defense_compatibility(
     if defense_cfg is None:
         return
     cfg = _as_dict(defense_cfg)
-    defense_type = cfg.get("type", "none")
-    if defense_type in {None, "none"}:
+    defense_name = cfg.get("name", "none")
+    if defense_name in {None, "none"}:
         return
     if attack_name not in DEFENSE_COMPATIBLE_ATTACKS:
         raise ValueError(

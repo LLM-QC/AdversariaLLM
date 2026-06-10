@@ -27,26 +27,31 @@ def test_parse_polyguard_output_expected_fields():
         "harmful_request": True,
         "response_refusal": False,
         "harmful_response": False,
+        "parse_success": True,
     }
 
 
 def test_build_target_system_none_returns_undefended_target():
     assert isinstance(build_target_system(None, model=object(), tokenizer=object()), UndefendedTarget)
     assert isinstance(
-        build_target_system({"type": "none"}, model=object(), tokenizer=object()),
+        build_target_system({"name": "none"}, model=object(), tokenizer=object()),
         UndefendedTarget,
     )
 
 
-def test_build_target_system_unknown_defense_type():
-    with pytest.raises(ValueError, match="Unknown defense type"):
-        build_target_system({"type": "not_a_real_defense"}, model=object(), tokenizer=object())
+def test_build_target_system_unknown_defense():
+    with pytest.raises(ValueError, match="Unknown defense"):
+        build_target_system({"name": "not_a_real_defense"}, model=object(), tokenizer=object())
 
 
 def test_defense_loss_matches_previous_target_token_slicing(monkeypatch):
     from adversariallm.defenses import base as base_mod
 
     class _LossOnlyTarget(TargetSystem):
+        @classmethod
+        def from_config(cls, cfg, *, model, tokenizer, default_generate_kwargs=None):
+            return cls(model, tokenizer)
+
         def generate(self, convs, **kwargs):
             raise NotImplementedError
 
@@ -138,7 +143,7 @@ def test_polyguard_uses_repo_model_loader_and_adaptive_batching(monkeypatch):
 
     defended = build_target_system(
         {
-            "type": "polyguard",
+            "name": "polyguard",
             "batch_size": 4,
             "max_new_tokens": 8,
             "overwrite_mode": "harmful_content",
@@ -152,7 +157,6 @@ def test_polyguard_uses_repo_model_loader_and_adaptive_batching(monkeypatch):
                 "trust_remote_code": True,
                 "chat_template": None,
                 "dtype": "bfloat16",
-                "device": "cpu",
             },
         },
         model=object(),
@@ -207,3 +211,14 @@ def test_polyguard_preserves_batched_generation_order():
         [{"index": 2}],
     ]
     assert result.input_ids == [[10], [20]]
+
+
+def test_parse_polyguard_output_fails_closed_and_marks_parse_failure():
+    parsed = parse_polyguard_output("not a valid PolyGuard response")
+
+    assert parsed == {
+        "harmful_request": True,
+        "response_refusal": True,
+        "harmful_response": True,
+        "parse_success": False,
+    }

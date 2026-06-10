@@ -21,9 +21,23 @@ class DefenseDecision:
 class TargetSystem(ABC):
     """Runtime interface attacks use for target-system interactions."""
 
+    NAME: str
+
     def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase):
         self.model = model
         self.tokenizer = tokenizer
+
+    @classmethod
+    @abstractmethod
+    def from_config(
+        cls,
+        cfg: dict[str, Any],
+        *,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        default_generate_kwargs: dict[str, Any] | None = None,
+    ) -> "TargetSystem":
+        raise NotImplementedError
 
     @abstractmethod
     def generate(
@@ -79,7 +93,7 @@ class TargetSystem(ABC):
 
 
 class UndefendedTarget(TargetSystem):
-    DEFENSE_TYPE = "none"
+    NAME = "none"
 
     @classmethod
     def from_config(
