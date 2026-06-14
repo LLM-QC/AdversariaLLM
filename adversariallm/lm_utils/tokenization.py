@@ -376,6 +376,14 @@ def tokenize_chats(chats: list[Conversation], tokenizer) -> list[torch.Tensor]:
     if tokenizer.bos_token:
         for i, template in enumerate(templates):
             templates[i] = template.removeprefix(tokenizer.bos_token)
+            if "llama-2" in tokenizer.name_or_path.lower() and tokenizer.eos_token and tokenizer.bos_token:
+                # Preserve the historical Llama-2 turn boundary tokenization across
+                # tokenizer implementations by keeping an explicit space before [INST]
+                # after internal </s><s> separators.
+                templates[i] = templates[i].replace(
+                    f"{tokenizer.eos_token}{tokenizer.bos_token}[INST]",
+                    f"{tokenizer.eos_token}{tokenizer.bos_token} [INST]",
+                )
 
     # have to torchify individually because results may be different lengths
     return [torch.tensor(t) for t in tokenizer(templates, add_special_tokens=True).input_ids]

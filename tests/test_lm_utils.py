@@ -16,13 +16,13 @@ from adversariallm.types import Conversation
 def load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-    # Llama-3.x HF chat templates inject a dynamic "Today Date" unless date_string is provided.
-    # These tests assert exact token IDs, so force a fixed date for reproducibility.
     if "llama-3" in model_id.lower():
+        # Raw HF Llama-3.x templates inject a dynamic "Today Date" unless date_string
+        # is provided. Fix the date so exact-token tests remain reproducible.
         original_apply_chat_template = tokenizer.apply_chat_template
 
         def _apply_chat_template_fixed_date(*args, **kwargs):
-            kwargs.setdefault("date_string", "02 Apr 2025")
+            kwargs.setdefault("date_string", "26 Jul 2024")
             return original_apply_chat_template(*args, **kwargs)
 
         tokenizer.apply_chat_template = _apply_chat_template_fixed_date  # type: ignore[method-assign]
@@ -296,7 +296,7 @@ MODEL_GROUND_TRUTH = {
     ],
     "meta-llama/Llama-3.2-1B-Instruct": [
         {
-            "pre": torch.tensor([128000, 128006, 9125, 128007, 271, 38766, 1303, 33025, 2696, 25, 6790, 220, 2366, 18, 198, 15724, 2696, 25, 220, 2437, 5186, 220, 2366, 20, 271, 128009, 128006, 882, 128007, 271]),
+            "pre": torch.tensor([128000, 128006, 9125, 128007, 271, 38766, 1303, 33025, 2696, 25, 6790, 220, 2366, 18, 198, 15724, 2696, 25, 220, 1627, 10263, 220, 2366, 19, 271, 128009, 128006, 882, 128007, 271]),
             "attack_prefix": torch.tensor([87, 865, 865, 865, 865]),
             "prompt": torch.tensor([9906, 11, 1268, 527, 499, 30]),
             "attack_suffix": torch.tensor([87, 865, 865, 865, 865]),
@@ -314,7 +314,7 @@ MODEL_GROUND_TRUTH = {
     ],
     "meta-llama/Llama-3.2-3B-Instruct": [
         {
-            "pre": torch.tensor([128000, 128006, 9125, 128007, 271, 38766, 1303, 33025, 2696, 25, 6790, 220, 2366, 18, 198, 15724, 2696, 25, 220, 2437, 5186, 220, 2366, 20, 271, 128009, 128006, 882, 128007, 271]),
+            "pre": torch.tensor([128000, 128006, 9125, 128007, 271, 38766, 1303, 33025, 2696, 25, 6790, 220, 2366, 18, 198, 15724, 2696, 25, 220, 1627, 10263, 220, 2366, 19, 271, 128009, 128006, 882, 128007, 271]),
             "attack_prefix": torch.tensor([87, 865, 865, 865, 865]),
             "prompt": torch.tensor([9906, 11, 1268, 527, 499, 30]),
             "attack_suffix": torch.tensor([87, 865, 865, 865, 865]),

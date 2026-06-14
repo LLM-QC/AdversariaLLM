@@ -11,7 +11,7 @@
 
 from dataclasses import dataclass
 
-import jailbreakbench as jbb
+from datasets import load_dataset
 
 from ..types import Conversation
 
@@ -28,9 +28,19 @@ class JBBBehaviorsConfig:
 
 @PromptDataset.register("jbb_behaviors")
 class JBBBehaviorsDataset(PromptDataset):
+    HF_DATASET_ID = "JailbreakBench/JBB-Behaviors"
+    HF_CONFIG = "behaviors"
+    HF_SPLIT = "harmful"
+
     def __init__(self, config: JBBBehaviorsConfig):
         super().__init__(config)
-        dataset = jbb.read_dataset().as_dataframe()
+        dataset = load_dataset(
+            self.HF_DATASET_ID,
+            self.HF_CONFIG,
+            split=self.HF_SPLIT,
+        ).to_pandas()
+        if "Index" in dataset.columns:
+            dataset = dataset.drop(columns=["Index"])
 
         self.idx, self.config_idx = self._select_idx(config, len(dataset))
 

@@ -10,7 +10,8 @@ from typing import Any, Literal, overload
 
 import torch
 import torch.nn.functional as F
-from transformers import DynamicCache, HybridCache, PreTrainedModel, PreTrainedTokenizerBase
+from transformers import DynamicCache, PreTrainedModel, PreTrainedTokenizerBase
+from transformers.cache_utils import StaticCache
 
 from .batching import with_max_batchsize
 from .filters import FILTER_REGISTRY, FilterPipeline, NullFilter, validate_json_strings
@@ -398,7 +399,7 @@ def generate_ragged(
                     past_key_values = DynamicCache()
                 else:
                     config = model.config if hasattr(model.config, "cache_implementation") else model.config.text_config
-                    past_key_values = HybridCache(
+                    past_key_values = StaticCache(
                         config=config,
                         max_batch_size=B,
                         max_cache_len=next_token_idx.max().item() + max_new_tokens,
