@@ -11,6 +11,7 @@ omegaconf>=2.1.0
 openai>=1.79.0
 orjson
 peft
+protobuf
 pytest
 scikit-learn
 seaborn

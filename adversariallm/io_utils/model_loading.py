@@ -24,7 +24,6 @@ from transformers.utils.logging import disable_progress_bar
 
 disable_progress_bar()  # disable progress bar for model loading
 
-
 def load_model_and_tokenizer(
     model_params: DictConfig | dict,
 ) -> tuple[PreTrainedModel, PreTrainedTokenizerBase]:
@@ -47,7 +46,6 @@ def load_model_and_tokenizer(
     """
     if not isinstance(model_params, DictConfig):
         model_params = DictConfig(model_params)
-
     gc.collect()
     torch.cuda.empty_cache()
     if model_params.dtype is None:
@@ -76,7 +74,7 @@ def load_model_and_tokenizer(
             quantization_config=quantization_config,
         ).eval()
     else:
-        if "gemma-3" in model_params.id:
+        if "gemma-3" in model_params.id or "gemma-4" in model_params.id:
             model = AutoModelForCausalLM.from_pretrained(
                 model_params.id,
                 dtype=getattr(torch, model_params.dtype),
@@ -143,6 +141,8 @@ def load_model_and_tokenizer(
         case path if "gemma-3" in path:
             # true ctx is 128k but we don't have that much memory
             tokenizer.model_max_length = 32768
+        case path if "gemma-4" in path:
+            tokenizer.model_max_length = model_params.context_window_size
         case path if "zephyr" in path:
             tokenizer.model_max_length = 32768
         case path if "openai/gpt-oss" in path:

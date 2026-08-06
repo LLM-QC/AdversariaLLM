@@ -52,6 +52,36 @@ google/gemma-3-27b-it:
   dtype: bfloat16
   chat_template: null
   trust_remote_code: True
+google/gemma-4-12B-it:
+  id: google/gemma-4-12B-it
+  tokenizer_id: google/gemma-4-12B-it
+  short_name: Gemma
+  developer_name: Google
+  compile: False
+  dtype: bfloat16
+  context_window_size: 32768  # model max: 262144
+  chat_template: null
+  trust_remote_code: True
+google/gemma-4-26B-A4B-it:
+  id: google/gemma-4-26B-A4B-it
+  tokenizer_id: google/gemma-4-26B-A4B-it
+  short_name: Gemma
+  developer_name: Google
+  compile: False
+  dtype: bfloat16
+  context_window_size: 32768  # model max: 262144
+  chat_template: null
+  trust_remote_code: True
+google/gemma-4-31B-it:
+  id: google/gemma-4-31B-it
+  tokenizer_id: google/gemma-4-31B-it
+  short_name: Gemma
+  developer_name: Google
+  compile: False
+  dtype: bfloat16
+  context_window_size: 32768  # model max: 262144
+  chat_template: null
+  trust_remote_code: True
 mistralai/Mistral-7B-Instruct-v0.3:
   id: mistralai/Mistral-7B-Instruct-v0.3
   tokenizer_id: mistralai/Mistral-7B-Instruct-v0.3
