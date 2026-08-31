@@ -1,0 +1,39 @@
+# Hydra entrypoint config for the thin `train_attacker.py` CLI wrapper (plan §4.2).
+#
+# Composes the target `model`, `dataset` and `defense` exactly like `conf/config.yaml` does for
+# run_attacks.py, plus the `training:` block. That block is the SHARED `conf/iho_training/default.yaml`
+# group (packaged here as `training`, and as `attacks.iho.training` for run_attacks.py) -- one source
+# of truth, so the two entry points never drift. Override fields on the CLI, e.g.
+# `python train_attacker.py model=... training.dpo.learning_rate=2e-4 training.n_cycles=8`.
+# The output of a run is a trained LoRA adapter under `${attacker_dir}/<attacker_id>/` (see §4.3);
+# `run_attacks.py attack=iho` produces the same via the shared loop.
+defaults:
+  - models: models
+  - datasets: datasets
+  - defenses: defenses
+  - paths
+  - iho_training@training: default   # shared training block (also conf/config.yaml's attacks.iho.training)
+  - override hydra/launcher: h100.yaml
+  - _self_
+
+hydra:
+  run:
+    dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
+  job:
+    chdir: true
+  sweep:
+    dir: ${root_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}/
+
+name: train_attacker
+
+model: null                # required: a key in conf/models/models.yaml (e.g. google/gemma-3-1b-it)
+dataset: jbb_behaviors     # a key in conf/datasets/datasets.yaml
+defense: none              # a key in conf/defenses/defenses.yaml
+
+# Generation config for the *target* model when scoring samples (completions + teacher-forced loss).
+generation_config:
+  temperature: 0.0
+  top_p: 1.0
+  top_k: 0
+  max_new_tokens: 256
+  num_return_sequences: 1

@@ -323,6 +323,46 @@ jailbreak_r1:
     top_p: 0.95
     top_k: 0
     max_new_tokens: 512
+iho:
+  name: iho
+  type: discrete
+  version: 0.1.0
+  generation_config: ${attacks._default.generation_config}
+  seed: ${attacks._default.seed}
+  num_samples_per_behavior: 64
+  attacker_batch_size: 64
+  compute_target_loss: true
+  # IHO's optimization is DPO-training the diffusion attacker, so attack=iho TRAINS by default
+  # (like every attack runs its own search). Transfer instead by setting attacker.lora_checkpoint
+  # (evaluate a trained adapter -- skips training) or train=false (evaluate the untrained base
+  # attacker). Training attempts are logged to parquet under attacker_dir and linked from each
+  # run.json (resume_metadata.iho_training.training_samples); the fresh post-training eval stays
+  # inline as normal run.json steps.
+  train: true
+  eval_after_train: true    # false => training-only (run.json = linked training manifest, no fresh eval)
+  # `training` is filled by the shared default `iho_training@attacks.iho.training` (conf/config.yaml
+  # defaults -> conf/iho_training/default.yaml, the same block train_attacker.py uses). Override
+  # fields directly, e.g. attacks.iho.training.dpo.learning_rate=2e-4. Null here is the placeholder
+  # the group fills.
+  training: null
+  attacker_dir: ${attacker_dir}  # from paths.yaml; where an in-attack-trained adapter is written
+  attacker:
+    backend: llada
+    id: GSAI-ML/LLaDA-8B-Base
+    tokenizer_id: null    # defaults to `id`
+    dtype: bfloat16
+    trust_remote_code: true
+    mask_token_id: 126336
+    prompt_len: 32
+    num_denoise_steps: 32
+    temperature: 0.0
+    remasking: low_confidence
+    mask_padding_tokens: true
+    global_remask_every: 8
+    global_remasking: random
+    answer_prefix: "\nAnswer: "
+    lora: null
+    lora_checkpoint: null
 inpainting:
   name: inpainting
   type: discrete

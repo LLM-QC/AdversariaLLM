@@ -37,6 +37,13 @@ from .data_analysis import (
     load_embedding
 )
 
+# IHO adaptive-run training-sample linking / reading
+from .iho_training_samples import (
+    build_training_samples_manifest,
+    get_training_manifest,
+    load_training_score_sequences,
+)
+
 # Memory management
 from .memory import free_vram
 
@@ -49,7 +56,12 @@ __all__ = [
     'load_model_and_tokenizer',
     'load_chat_template',
     'num_model_params',
-    
+
+    # IHO training-sample linking / reading
+    'build_training_samples_manifest',
+    'get_training_manifest',
+    'load_training_score_sequences',
+
     # Database
     'get_mongodb_connection',
     'log_config_to_db',

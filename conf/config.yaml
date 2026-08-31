@@ -1,5 +1,6 @@
 defaults:
   - attacks: attacks
+  - iho_training@attacks.iho.training: default   # single-source IHO training block (also used by train_attacker.py)
   - datasets: datasets
   - models: models
   - defenses: defenses

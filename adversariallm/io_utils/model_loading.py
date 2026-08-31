@@ -7,6 +7,7 @@ and tokenizers with various optimizations and model-specific configurations.
 
 import gc
 import logging
+import os
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
@@ -23,6 +24,71 @@ from transformers import (
 from transformers.utils.logging import disable_progress_bar
 
 disable_progress_bar()  # disable progress bar for model loading
+
+
+def _is_hf_lock_permission_error(exc: Exception) -> bool:
+    msg = str(exc)
+    # Shared-cache fallback currently keys off the error text shape seen with
+    # huggingface_hub 0.x. This has not been explicitly re-validated on the
+    # Hub 1.x / Transformers 5.x stack yet.
+    return "PermissionError at" in msg and "/.locks/" in msg and ".lock" in msg
+
+
+def _shared_hf_cache_dir() -> Path | None:
+    cache = (
+        os.environ.get("HUGGINGFACE_HUB_CACHE")
+        or os.environ.get("HF_HUB_CACHE")
+        or os.environ.get("TRANSFORMERS_CACHE")
+    )
+    if cache:
+        p = Path(cache)
+        return p if p.exists() else None
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        p = Path(hf_home) / "hub"
+        return p if p.exists() else None
+    return None
+
+
+def _latest_populated_snapshot(repo_id: str) -> Path | None:
+    cache_dir = _shared_hf_cache_dir()
+    if cache_dir is None:
+        return None
+    repo_dir = cache_dir / f"models--{repo_id.replace('/', '--')}"
+    snapshots = repo_dir / "snapshots"
+    if not snapshots.is_dir():
+        return None
+    candidates = []
+    for d in snapshots.iterdir():
+        if not d.is_dir():
+            continue
+        # Treat tokenizer/model/config presence as "populated enough" for fallback loads.
+        if any((d / name).exists() for name in ("config.json", "tokenizer_config.json", "tokenizer.json", "model.safetensors.index.json", "pytorch_model.bin")):
+            candidates.append(d)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
+def _with_shared_snapshot_fallback(loader, repo_id: str, **kwargs):
+    try:
+        return loader(repo_id, **kwargs)
+    except OSError as e:
+        if not _is_hf_lock_permission_error(e):
+            raise
+        snapshot = _latest_populated_snapshot(repo_id)
+        if snapshot is None:
+            raise
+        logging.warning(
+            "HF shared-cache lock permission issue for %s; retrying from local snapshot %s",
+            repo_id,
+            snapshot,
+        )
+        kwargs = dict(kwargs)
+        kwargs["local_files_only"] = True
+        return loader(str(snapshot), **kwargs)
+
 
 def load_model_and_tokenizer(
     model_params: DictConfig | dict,

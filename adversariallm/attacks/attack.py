@@ -81,6 +81,12 @@ class SingleAttackRunResult:
     # Total time taken for this entire attack run on a **single instance**
     total_time: float = 0.0
 
+    # Visible metadata for resumed/linked runs. Intentionally separate from the
+    # checkpoint payload so parsers can follow the chain through run.json files.
+    # IHO adaptive runs use it to link their per-cycle training-sample parquets
+    # (resume_metadata.iho_training.training_samples).
+    resume_metadata: Optional[dict[str, Any]] = None
+
 
 @beartype
 @dataclass
@@ -150,6 +156,10 @@ class Attack(Generic[AttRes]):
                 from .human_jailbreaks import HumanJailbreaksAttack
 
                 return HumanJailbreaksAttack
+            case "iho":
+                from .iho import IHOAttack
+
+                return IHOAttack
             case "inpainting":
                 from .inpainting import InpaintingAttack
 

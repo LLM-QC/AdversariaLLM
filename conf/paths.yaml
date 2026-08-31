@@ -3,3 +3,9 @@
 #   python run_attacks.py root_dir=/absolute/path/to/repo ...
 # If you prefer, you can also hard-code your repository path here.
 root_dir: ${oc.env:PWD}
+
+# Where trained attacker artifacts (LoRA adapters, cycle samples, training metrics) go.
+# Lives here rather than in config.yaml because both run_attacks.py and train_attacker.py
+# need it. Adapters are small but the per-cycle sample parquets are not, so on a cluster
+# point this at large shared storage rather than an NFS home.
+attacker_dir: ${root_dir}/attackers/

@@ -1,0 +1,68 @@
+# Single source of truth for the IHO training block. Packaged into `attacks.iho.training` for
+# run_attacks.py (attack=iho) and into `training` for train_attacker.py via each app's defaults
+# list (`- iho_training@<pkg>: default`), so the two entry points never drift. Defaults are the
+# SMALL-set values; override fields on the CLI (attacks.iho.training.dpo.learning_rate=2e-4).
+attacker:
+  backend: llada
+  id: GSAI-ML/LLaDA-8B-Base
+  tokenizer_id: null
+  dtype: bfloat16
+  trust_remote_code: true
+  mask_token_id: 126336
+  prompt_len: 32
+  num_denoise_steps: 32
+  temperature: 0.0
+  remasking: low_confidence
+  mask_padding_tokens: true
+  global_remask_every: 8
+  global_remasking: random
+  answer_prefix: "\nAnswer: "
+  lora:
+    r: 8
+    lora_alpha: 16
+    target_modules: [q_proj, v_proj]
+    lora_dropout: 0.05
+    bias: none
+    task_type: CAUSAL_LM
+    use_rslora: false
+  lora_checkpoint: null
+dpo:
+  learning_rate: 1.0e-5
+  beta: 0.25
+  epochs: 200
+  batch_size: 16
+  masking_mode: prompt
+  mask_all: false
+  max_grad_norm: 1.0
+  checkpoint_every: 1
+  patience: 1
+  warmup_epochs: 0
+  load_optimizer_state: false
+  selection_metric: mean
+pairing:
+  min_score: 0.2
+  percent_chosen: 0.125
+  expanding: false
+logging:
+  mode: disabled
+  entity: null
+  project: llm-quick-check-iho
+  name: null
+  group: null
+  tags: []
+n_cycles: 4
+attacker_batch_size: 64
+train_idx: null
+val_idx: null
+eval_idx: null
+n_samples:
+  train: 512
+  eval: 128
+  val: 512
+train_judge: strong_reject
+val_judges: [harmbench]
+seed: 0
+attacker_id: auto
+save_cycle_samples: true
+save_dpo_samples: true
+resume: true
