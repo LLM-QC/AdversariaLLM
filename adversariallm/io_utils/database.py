@@ -17,6 +17,15 @@ from pymongo.synchronous.database import Database
 from .data_analysis import get_nested_value, normalize_value_for_grouping
 
 
+def mongodb_is_configured() -> bool:
+    if os.environ.get("MONGODB_URI"):
+        return True
+    return all(
+        os.environ.get(key)
+        for key in ("MONGODB_USER", "MONGODB_PASSWORD", "MONGODB_HOST")
+    )
+
+
 def get_mongodb_connection() -> Database:
     """Get a MongoDB connection.
 
@@ -26,9 +35,18 @@ def get_mongodb_connection() -> Database:
     user = os.environ.get("MONGODB_USER")
     password = os.environ.get("MONGODB_PASSWORD")
     host = os.environ.get("MONGODB_HOST")
-    mongo_uri = os.environ.get("MONGODB_URI", f"mongodb://{user}:{password}@{host}?authSource={user}")
+    mongo_uri = os.environ.get("MONGODB_URI")
+    if not mongo_uri:
+        if not all((user, password, host)):
+            raise RuntimeError(
+                "MongoDB is not configured. Set MONGODB_URI or all of "
+                "MONGODB_USER/MONGODB_PASSWORD/MONGODB_HOST."
+            )
+        mongo_uri = f"mongodb://{user}:{password}@{host}?authSource={user}"
     client = MongoClient(mongo_uri)
     db_name = os.environ.get("MONGODB_DB", user)
+    if not db_name:
+        raise RuntimeError("MongoDB database name is missing. Set MONGODB_DB.")
     return client[db_name]
 
 

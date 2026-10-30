@@ -15,9 +15,22 @@ from adversariallm.errors import print_exceptions
 from adversariallm.io_utils import RunConfig, filter_config, free_vram, load_model_and_tokenizer, log_attack
 from run_judges import run_judges
 
-torch.use_deterministic_algorithms(True, warn_only=True)
-torch.backends.cuda.matmul.allow_tf32 = True
-torch._dynamo.config.recompile_limit = 512  # needed for gemma 3 on AutoDAN
+
+def _configure_torch_runtime() -> None:
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    torch.backends.cuda.matmul.allow_tf32 = True
+    dynamo = getattr(torch, "_dynamo", None)
+    dynamo_config = getattr(dynamo, "config", None)
+    if dynamo_config is not None and hasattr(dynamo_config, "recompile_limit"):
+        dynamo_config.recompile_limit = 512  # needed for gemma 3 on AutoDAN
+    else:
+        logging.warning(
+            "torch._dynamo.config.recompile_limit is unavailable in this torch build; "
+            "continuing without setting it."
+        )
+
+
+_configure_torch_runtime()
 
 
 def select_configs(cfg: DictConfig, name: str | ListConfig | None) -> list[tuple[str, DictConfig]]:

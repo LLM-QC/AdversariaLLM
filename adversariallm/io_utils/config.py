@@ -24,9 +24,6 @@ class RunConfig:
 
 
 def filter_config(run_config: RunConfig, dset_len: int, overwrite: bool = False) -> RunConfig | None:
-    db = get_mongodb_connection()
-    collection = db.runs
-
     OmegaConf.resolve(run_config.attack_params)
     if run_config.defense_params is not None:
         OmegaConf.resolve(run_config.defense_params)
@@ -40,6 +37,13 @@ def filter_config(run_config: RunConfig, dset_len: int, overwrite: bool = False)
         idx = [original_idx]
     else:
         idx = original_idx
+
+    if overwrite:
+        run_config.dataset_params.idx = idx
+        return run_config
+
+    db = get_mongodb_connection()
+    collection = db.runs
 
     filtered_idx = []
     for i in idx:

@@ -16,7 +16,7 @@ import safetensors.torch
 from omegaconf import DictConfig, OmegaConf
 
 from ..attacks import AttackResult
-from .database import log_config_to_db
+from .database import log_config_to_db, mongodb_is_configured
 from .json_utils import CompactJSONEncoder
 
 
@@ -75,4 +75,9 @@ def log_attack(run_config, result: AttackResult, cfg: DictConfig, date_time_stri
         with open(log_file, "w") as f:
             json.dump(log_message, f, indent=2, cls=CompactJSONEncoder)
         logging.info(f"Attack logged to {log_file}")
-        log_config_to_db(subrun_config, subrun_result, log_file)
+        if mongodb_is_configured():
+            log_config_to_db(subrun_config, subrun_result, log_file)
+        else:
+            logging.info(
+                "Skipping MongoDB run logging because MONGODB_* environment variables are not configured."
+            )

@@ -16,3 +16,25 @@ polyguard:
   batch_size: null
   overwrite_mode: harmful_content
   refusal_text: "Sorry, I can't assist you with that."
+
+safety_polytope:
+  name: safety_polytope
+  # Must match the base model used when the Safety Polytope constraint artifact was trained.
+  # SafetyPolytope's published HarmBench examples include Qwen/Qwen2-1.5B-Instruct.
+  model_id: Qwen/Qwen2-1.5B-Instruct
+  # Absolute path or environment-variable-expanded path to the trained upstream .pth artifact.
+  # Set SAFETY_POLYTOPE_WEIGHTS in your environment to the real artifact location.
+  weights_path: ${oc.env:SAFETY_POLYTOPE_WEIGHTS,./artifacts/safety_polytope/weights.pth}
+  device_map: auto
+  model_kwargs:
+    # Adapter accepts torch dtype strings ("float16"/"bfloat16"/"auto") and converts them safely.
+    torch_dtype: float16
+  steer_layer: 20
+  steer_first_n_tokens: 20
+  use_backup_response: false
+  lambda_weight: 2.0
+  safe_violation_weight: 0.0001
+  projection: false
+  max_input_tokens: 2048
+  max_new_tokens: 128
+  backup_response: "Sorry, I can't help with that request."

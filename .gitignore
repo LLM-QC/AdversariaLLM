@@ -12,3 +12,4 @@ cache
 viz
 wandb
 embeddings/
+artifacts/safety_polytope/

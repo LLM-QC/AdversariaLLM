@@ -7,11 +7,13 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from .base import TargetSystem, UndefendedTarget
 from .polyguard import PolyGuardDefense
+from .safety_polytope import SafetyPolytopeDefense
 
 
 _DEFENSE_REGISTRY: dict[str, type[TargetSystem]] = {
     UndefendedTarget.NAME: UndefendedTarget,
     PolyGuardDefense.NAME: PolyGuardDefense,
+    SafetyPolytopeDefense.NAME: SafetyPolytopeDefense,
 }
 
 DEFENSE_COMPATIBLE_ATTACKS = frozenset(
